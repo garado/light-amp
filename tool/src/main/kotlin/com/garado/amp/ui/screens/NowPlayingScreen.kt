@@ -1038,7 +1038,7 @@ class NowPlayingScreen(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .height(px(SECONDARY_ROW_PX))
+                .height(px(BOTTOM_BAR_PX))
                 .padding(horizontal = 2f.gridUnitsAsDp()),
             verticalAlignment = Alignment.CenterVertically,
         ) {
@@ -1206,9 +1206,8 @@ private const val UNDERLINE_GAP_PX = 3
 private const val UNDERLINE_W_PX = 51
 private const val UNDERLINE_H_PX = 3
 
-/** The seek line's own touch height, and the row's height at the foot of the player. */
+/** The seek line's own touch height. */
 private const val BAR_HIT_PX = 80
-private const val SECONDARY_ROW_PX = 100
 
 /** The centred group's own side margin, and the gap between its three sections. */
 private const val INSET_PX = 80
