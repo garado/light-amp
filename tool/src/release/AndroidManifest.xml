@@ -31,7 +31,7 @@
       grantable because of its `development` protection flag, so it stays inert
       until the user runs, once, on a machine with adb:
 
-        adb shell pm grant com.sublunar.amp android.permission.WRITE_SECURE_SETTINGS
+        adb shell pm grant com.garado.amp android.permission.WRITE_SECURE_SETTINGS
 
       Verified: without the grant the app launches, the filter stays on, and
       nothing throws — a clean no-op. The grant survives `install -r` and is lost

@@ -13,7 +13,7 @@
       is in front. Needs a one-time grant (the permission's `development`
       protection flag is what makes that possible on a side-loaded build):
 
-        adb shell pm grant com.sublunar.amp android.permission.WRITE_SECURE_SETTINGS
+        adb shell pm grant com.garado.amp android.permission.WRITE_SECURE_SETTINGS
 
       Debug overlay only: the plugin validates src/main, so this never reaches a
       submitted build. Remove along with the spike when Light offers an official

@@ -1,5 +1,5 @@
 [tool]
-id = "com.sublunar.amp"
+id = "com.garado.amp"
 label = "Amp"
 versionCode = 14
 versionName = "0.6.1"
