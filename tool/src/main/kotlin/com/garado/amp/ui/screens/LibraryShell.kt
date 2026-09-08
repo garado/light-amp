@@ -1007,7 +1007,8 @@ fun Navbar(
 }
 
 /**
- * Simplified layout: 3-button navbar with Search, Browse (center), and Now Playing.
+ * Simplified layout: 3-button navbar with Browse (left), Now Playing (center),
+ * and Search (right).
  */
 @Composable
 private fun SimplifiedNavbar(
@@ -1024,14 +1025,14 @@ private fun SimplifiedNavbar(
     // two glyphs are drawn at different sizes.
     val tile = px(BOTTOM_BAR_PX)
     val librarySlack = (tile - px(NAV_ICON_PX) * navScale(LIBRARY_DRAWN_PX, TALL_TARGET_PX)) / 2
-    val playerSlack = (tile - px(NAV_ICON_PX) * NOW_PLAYING_SCALE) / 2
+    val searchSlack = (tile - px(NAV_ICON_PX) * SEARCH_SCALE) / 2
     Row(
         modifier = Modifier
             .fillMaxWidth()
             .height(px(BOTTOM_BAR_PX))
             .padding(
                 start = (artworkEdge - librarySlack).coerceAtLeast(0.dp),
-                end = (artworkEdge - playerSlack).coerceAtLeast(0.dp),
+                end = (artworkEdge - searchSlack).coerceAtLeast(0.dp),
             ),
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically,
@@ -1053,17 +1054,16 @@ private fun SimplifiedNavbar(
             box = BOTTOM_BAR_PX,
         ) { onBrowse?.invoke() }
         Spacer(Modifier.weight(1f))
-        NavTile(AppIcons.Search, active = searchActive) { onSearch() }
-        Spacer(Modifier.weight(1f))
-        // The player at the right: the one thing in this bar that isn't
+        // The player in the middle: the one thing in this bar that isn't
         // somewhere to browse, and under this layout the bar is the only route
         // to it.
+        NavTile(AppIcons.Waveform, active = false, scale = NOW_PLAYING_SCALE) { onNowPlaying() }
+        Spacer(Modifier.weight(1f))
         NavTile(
-            AppIcons.Waveform,
-            active = false,
-            scale = NOW_PLAYING_SCALE,
+            AppIcons.Search,
+            active = searchActive,
             box = BOTTOM_BAR_PX,
-        ) { onNowPlaying() }
+        ) { onSearch() }
     }
 }
 
