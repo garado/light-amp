@@ -59,6 +59,7 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.TextUnit
@@ -246,6 +247,7 @@ fun appTextStyle(
     role: TextRole = TextRole.Copy,
     weight: FontWeight? = null,
     align: TextAlign? = null,
+    underline: Boolean = false,
 ): androidx.compose.ui.text.TextStyle {
     val base = role.style()
     return base.copy(
@@ -254,6 +256,7 @@ fun appTextStyle(
         fontWeight = onDeviceWeight(weight ?: base.fontWeight ?: FontWeight.Normal),
         letterSpacing = trackingFor(base, size),
         textAlign = align ?: TextAlign.Unspecified,
+        textDecoration = if (underline) TextDecoration.Underline else TextDecoration.None,
     )
 }
 
@@ -271,8 +274,10 @@ fun AppText(
     maxLines: Int = Int.MAX_VALUE,
     align: TextAlign? = null,
     overflow: TextOverflow = TextOverflow.Ellipsis,
+    /** Marks the current selection among a set of rows — see [TextRow]. */
+    underline: Boolean = false,
 ) {
-    val style = appTextStyle(size, lineHeight, role, weight, align)
+    val style = appTextStyle(size, lineHeight, role, weight, align, underline)
     Text(
         text = text,
         modifier = if (dim) modifier.alpha(0.5f) else modifier,

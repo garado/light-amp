@@ -163,7 +163,7 @@ fun LibraryShell(
                         actions,
                     )
                 } else if (libraryIndex) {
-                    LibraryIndex(actions)
+                    LibraryIndex(currentTab, actions)
                 } else {
                     TabContent(currentTab, actions)
                 }
@@ -891,7 +891,7 @@ private fun PlaylistsTab(actions: ShellActions, header: Boolean = true) {
  * from anywhere.
  */
 @Composable
-private fun LibraryIndex(actions: ShellActions) {
+private fun LibraryIndex(currentTab: LibraryTab, actions: ShellActions) {
     val source by App.source.collectAsState()
     // The liked lists appear only where there is something in them, and not at
     // all where the source has no likes — see MusicSource.supportsLikes.
@@ -899,6 +899,9 @@ private fun LibraryIndex(actions: ShellActions) {
     val likedAlbums by App.library.likedAlbums.collectAsState()
     val likedTracks by App.library.likedTracks.collectAsState()
     val likes = source.supportsLikes
+    // Which row is where you already are, so the index reads as a map rather
+    // than a plain menu — see IndexRow/LikedRow.
+    val currentLikedOnly = likedOnly(currentTab)
 
     // A Column of its own: the shell hands each page a Box, so a header and a
     // list dropped into it straight would be drawn one on top of the other.
@@ -915,32 +918,32 @@ private fun LibraryIndex(actions: ShellActions) {
         // A source with no server has nowhere to keep a playlist — see
         // MusicSource.supportsPlaylists.
         if (source.supportsPlaylists) {
-            item { IndexRow(LibraryTab.PLAYLISTS) }
+            item { IndexRow(LibraryTab.PLAYLISTS, current = currentTab == LibraryTab.PLAYLISTS) }
         }
-        item { IndexRow(LibraryTab.ARTISTS) }
-        item { IndexRow(LibraryTab.ALBUMS) }
-        item { IndexRow(LibraryTab.SONGS) }
+        item { IndexRow(LibraryTab.ARTISTS, current = currentTab == LibraryTab.ARTISTS && !currentLikedOnly) }
+        item { IndexRow(LibraryTab.ALBUMS, current = currentTab == LibraryTab.ALBUMS && !currentLikedOnly) }
+        item { IndexRow(LibraryTab.SONGS, current = currentTab == LibraryTab.SONGS && !currentLikedOnly) }
         // The same three again, narrowed — as a block under the whole set, so
         // the plain lists stay together and read as one thing.
         if (likes && likedArtists.isNotEmpty()) {
-            item { LikedRow(LibraryTab.ARTISTS) }
+            item { LikedRow(LibraryTab.ARTISTS, current = currentTab == LibraryTab.ARTISTS && currentLikedOnly) }
         }
         if (likes && likedAlbums.isNotEmpty()) {
-            item { LikedRow(LibraryTab.ALBUMS) }
+            item { LikedRow(LibraryTab.ALBUMS, current = currentTab == LibraryTab.ALBUMS && currentLikedOnly) }
         }
         if (likes && likedTracks.isNotEmpty()) {
-            item { LikedRow(LibraryTab.SONGS) }
+            item { LikedRow(LibraryTab.SONGS, current = currentTab == LibraryTab.SONGS && currentLikedOnly) }
         }
     }
     }
 }
 
-/** One tab, on the index: its own bar icon, and its name. */
+/** One tab, on the index: its name, underlined when it's where you already are. */
 @Composable
-private fun IndexRow(tab: LibraryTab) {
+private fun IndexRow(tab: LibraryTab, current: Boolean) {
     TextRow(
         title = tab.title,
-        leading = { AppIcon(iconFor(tab), size = px(56)) },
+        underline = current,
         onClick = {
             // The unnarrowed list: an entry named "Albums" that showed only the
             // liked ones because the filter was left on would be lying.
@@ -952,10 +955,10 @@ private fun IndexRow(tab: LibraryTab) {
 
 /** The same tab, narrowed to what you kept. */
 @Composable
-private fun LikedRow(tab: LibraryTab) {
+private fun LikedRow(tab: LibraryTab, current: Boolean) {
     TextRow(
         title = "Liked ${tab.title}",
-        leading = { AppIcon(AppIcons.Favorite, size = px(56)) },
+        underline = current,
         onClick = {
             App.scope.launch { setLikedOnly(tab, true) }
             LibraryNav.selectTab(tab)

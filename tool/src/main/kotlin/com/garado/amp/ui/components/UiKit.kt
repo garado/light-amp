@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
+import androidx.compose.ui.unit.dp
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -188,7 +189,7 @@ fun Modifier.appClickable(
  * that names a setting, the name small above its current value large, the
  * value being the information. The stock menus set the line in Heading; tried,
  * and it shouted on a page of rows, so it sits one step down Light's scale at
- * Copy — the size the phone's own lists title in. Text starts [MENU_INSET_PX] in, the two units
+ * Copy — the size the phone's own lists title in. Text starts [MENU_INSET_DP] in, the two units
  * Light's text-only lists use; the lists with a mark and a cover keep the 72px
  * axis Light's own Music list has ([ROW_LEAD_PX]).
  */
@@ -214,6 +215,8 @@ fun TextRow(
     /** Sits before the text, for a row that needs saying what it opens. */
     leading: (@Composable () -> Unit)? = null,
     trailing: (@Composable () -> Unit)? = null,
+    /** Marks this row as the current selection among a set of rows — see the Library index. */
+    underline: Boolean = false,
     /**
      * Null for a row that states something rather than opening it — a setting
      * with only one possible value, which More still shows so the page's
@@ -228,7 +231,7 @@ fun TextRow(
             .let {
                 if (onClick == null) it else it.slowLongPress(onClick, onLongPress = onLongClick)
             }
-            .padding(horizontal = px(MENU_INSET_PX), vertical = px(MENU_PAD_PX)),
+            .padding(horizontal = MENU_INSET_DP, vertical = px(MENU_PAD_PX)),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         if (leading != null) {
@@ -238,9 +241,9 @@ fun TextRow(
         Column(modifier = Modifier.weight(1f)) {
             if (value != null) {
                 MenuLabel(title)
-                MenuLine(value, dim = onClick == null)
+                MenuLine(value, dim = onClick == null, underline = underline)
             } else {
-                MenuLine(title, dim = onClick == null)
+                MenuLine(title, dim = onClick == null, underline = underline)
                 if (!subtitle.isNullOrBlank()) MenuLabel(subtitle, maxLines = subtitleLines)
             }
         }
@@ -250,7 +253,7 @@ fun TextRow(
 
 /** A menu row's main line: Light's Copy — Heading read too big, see [TextRow]. */
 @Composable
-private fun MenuLine(text: String, dim: Boolean) {
+private fun MenuLine(text: String, dim: Boolean, underline: Boolean = false) {
     AppText(
         text,
         pxSp(LightType.COPY_PX),
@@ -258,6 +261,7 @@ private fun MenuLine(text: String, dim: Boolean) {
         role = TextRole.Copy,
         dim = dim,
         maxLines = 1,
+        underline = underline,
     )
 }
 
@@ -274,12 +278,8 @@ private fun MenuLabel(text: String, maxLines: Int = 1) {
     )
 }
 
-/**
- * Where a menu row's text starts: two grid units, as on the phone's own
- * text-only lists (the Phone tool, every stock Settings page). The same 80px
- * the corner glyphs and the bar glyphs sit on.
- */
-const val MENU_INSET_PX = 80
+/** Where a menu row's text starts, and a section label's. */
+val MENU_INSET_DP = 16.dp
 
 /** Above and below a row's text: with Copy's line, a 136px pitch. */
 private const val MENU_PAD_PX = 32
@@ -309,7 +309,7 @@ fun SectionLabel(text: String) {
         role = TextRole.Detail,
         dim = true,
         modifier = Modifier.padding(
-            start = px(MENU_INSET_PX),
+            start = MENU_INSET_DP,
             top = px(SECTION_TOP_PX),
             bottom = px(SECTION_BOTTOM_PX),
         ),
