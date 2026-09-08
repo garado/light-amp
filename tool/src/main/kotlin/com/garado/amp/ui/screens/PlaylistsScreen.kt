@@ -112,7 +112,7 @@ class PlaylistDetailScreen(
                     // delete. Same menu as a long-press on its row; see the
                     // album page, which made the same trade.
                     rightAction = HeaderAction(
-                        AppIcons.MoreVert,
+                        AppIcons.MoreHoriz,
                         onLongClick = { go { SettingsScreen(it) } },
                     ) {
                         go { PlaylistActionsScreen(it, playlistId, liveName, fromDetail = true) }

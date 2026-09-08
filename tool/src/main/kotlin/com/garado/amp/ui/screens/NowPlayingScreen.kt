@@ -60,6 +60,7 @@ import com.garado.amp.data.LyricsRepository
 import com.garado.amp.data.LastSection
 import com.garado.amp.data.RepeatMode
 import com.garado.amp.data.Track
+import com.garado.amp.data.primaryAlbumArtist
 import com.garado.amp.ui.PlayerTheme
 import com.garado.amp.ui.components.AppArtwork
 import com.garado.amp.ui.components.AppHeader
@@ -69,8 +70,6 @@ import com.garado.amp.ui.components.AppIcons
 import com.garado.amp.ui.components.AppProgressBar
 import android.view.KeyEvent
 import androidx.compose.foundation.Image
-import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.layout.ContentScale
 import com.garado.amp.ui.components.TextRole
 import com.garado.amp.ui.components.rememberArtwork
@@ -85,7 +84,7 @@ import com.garado.amp.ui.components.ROW_SUB_LINE_PX
 import com.garado.amp.ui.components.SelectionHeader
 import com.garado.amp.ui.components.SelectionState
 import com.garado.amp.ui.components.rememberSelection
-import com.garado.amp.ui.components.TitleCard
+import com.garado.amp.ui.components.TrackMetadataCard
 import com.garado.amp.ui.components.HEADER_BAR_PX
 import com.garado.amp.ui.components.formatTime
 import com.garado.amp.ui.LightType
@@ -96,7 +95,15 @@ import com.garado.amp.ui.components.rowClickable
 import com.garado.amp.ui.components.slowLongPress
 import com.thelightphone.sdk.SealedLightActivity
 import com.thelightphone.sdk.SimpleLightScreen
+import com.thelightphone.sdk.ui.LightIcon
+import com.thelightphone.sdk.ui.LightIconConfiguration
+import com.thelightphone.sdk.ui.LightIcons
+import com.thelightphone.sdk.ui.LightText
+import com.thelightphone.sdk.ui.LightTextVariant
 import com.thelightphone.sdk.ui.LightThemeTokens
+import com.thelightphone.sdk.ui.gridUnitsAsDp
+import com.thelightphone.sdk.ui.lightClickable
+import androidx.compose.foundation.shape.CircleShape
 import com.garado.amp.ui.components.appClickable
 import kotlinx.coroutines.launch
 
@@ -146,11 +153,6 @@ object NowPlayingNav {
      * pane; the screen resets it on each open.
      */
     val coverChrome = mutableStateOf(true)
-}
-
-private fun nextView(v: NpView): NpView = when (v) {
-    NpView.ARTWORK -> NpView.QUEUE
-    NpView.QUEUE -> NpView.ARTWORK
 }
 
 class NowPlayingScreen(
@@ -476,8 +478,9 @@ class NowPlayingScreen(
     ) {
         val scope = rememberCoroutineScope()
         Box(
-            // Fills the cell so tap-to-skip and hold-to-scrub get the whole square.
-            modifier = Modifier.fillMaxSize().pointerInput(Unit) {
+            // A fixed tap target, generous beyond the icon, so tap-to-skip and
+            // hold-to-scrub have room to land.
+            modifier = Modifier.size(px(TRANSPORT_TAP_PX)).pointerInput(Unit) {
                 awaitEachGesture {
                     awaitFirstDown()
                     var scrubbing = false
@@ -508,11 +511,11 @@ class NowPlayingScreen(
      * A black header over full-bleed artwork, with every control floating on the
      * cover itself.
      *
-     * Below the header nothing is stacked: each element is anchored to the bottom
-     * of the screen at the exact depth the design gives it — seek line 360px up,
-     * clocks 40px under that, transport 240px up, the secondary row 120px up.
-     * Stacking would make every one of those depths a consequence of the ones
-     * above it, and a single font-metric change would move them all.
+     * Metadata (hero mode only), the seek line and clocks, and the transport are
+     * one auto-laid-out column, centred in whatever space is left above the
+     * shuffle/repeat row — real Compose layout, not a hand-measured depth for
+     * each piece, so they stay centred as a group regardless of screen size or a
+     * font-metric change.
      *
      * Cover Only is this same page with the sleeve moved out from its panel to
      * fill everything under the header. Nothing else moves — the controls dim,
@@ -545,9 +548,23 @@ class NowPlayingScreen(
                     onBack = { goBack() },
                     // Nothing in the card's place in hero mode, where the
                     // title lives on the stage instead — see heroTitle.
-                    titleContent = if (heroTitle) null else ({ TitleCard(current.title, current.artist) }),
+                    titleContent = if (heroTitle) {
+                        null
+                    } else {
+                        ({
+                            TrackMetadataCard(
+                                current.artist,
+                                current.album,
+                                current.title,
+                                onArtistClick = { openArtist(current.primaryAlbumArtist(), Parent.tab(LibraryTab.ARTISTS)) },
+                                onAlbumClick = current.albumId?.let { id ->
+                                    { openAlbum(id, Parent.artist(current.primaryAlbumArtist())) }
+                                },
+                            )
+                        })
+                    },
                     rightAction = HeaderAction(
-                        AppIcons.MoreVert,
+                        AppIcons.MoreHoriz,
                         onLongClick = { go { SettingsScreen(it) } },
                     ) { openOptions(current.id, artwork, coverOnly) },
                 )
@@ -569,20 +586,58 @@ class NowPlayingScreen(
                         if (!coverOnly) NowPlayingNav.coverChrome.value = false
                     },
                 )
-                if (heroTitle) TitleBlock(current)
                 if (!coverOnly || chrome) {
-                    // On the cover everything steps back a little, but by less
-                    // than the secondary row is knocked back on black: there it
-                    // is being separated from the transport above it, here it is
-                    // being kept legible over a picture, and the second job needs
-                    // more of the glyph than the first.
-                    val dim = if (coverOnly) ON_COVER_ALPHA else DIM_ALPHA
                     if (coverOnly) ControlScrim()
-                    SeekBand(alpha = if (coverOnly) ON_COVER_ALPHA else 1f)
-                    TransportRow()
-                    SecondaryRow(current, alpha = dim)
+                    // A real column, not a set of hand-measured depths: the
+                    // centred group takes whatever space the shuffle/repeat
+                    // row leaves it and centres itself in it, the way Light
+                    // Music's own player does.
+                    Column(modifier = Modifier.fillMaxSize()) {
+                        Box(modifier = Modifier.weight(1f), contentAlignment = Alignment.Center) {
+                            CenteredControls(
+                                current,
+                                heroTitle,
+                                barAlpha = if (coverOnly) ON_COVER_ALPHA else 1f,
+                            )
+                        }
+                        // Shuffle and repeat, full strength always — Light Music
+                        // never knocks these two back, on black or on a cover alike.
+                        SecondaryRow()
+                    }
                 }
             }
+        }
+    }
+
+    /**
+     * Metadata (hero mode only), the seek line and clocks, and the transport —
+     * one column, centred as a group by [ArtPlayer]'s own layout rather than by
+     * pixel depths measured up from the screen's edge.
+     */
+    @Composable
+    private fun CenteredControls(current: Track, heroTitle: Boolean, barAlpha: Float) {
+        Column(
+            modifier = Modifier.fillMaxWidth().padding(horizontal = px(INSET_PX)),
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            if (heroTitle) {
+                Column(verticalArrangement = Arrangement.spacedBy(px(HERO_GAP_PX))) {
+                    HeroLine(current.artist) {
+                        openArtist(current.primaryAlbumArtist(), Parent.tab(LibraryTab.ARTISTS))
+                    }
+                    val albumId = current.albumId
+                    HeroLine(current.album, onClick = if (albumId != null) {
+                        { openAlbum(albumId, Parent.artist(current.primaryAlbumArtist())) }
+                    } else {
+                        null
+                    })
+                    HeroLine(current.title)
+                }
+                Spacer(Modifier.height(px(CONTROLS_GAP_PX)))
+            }
+            SeekBarAndTime(barAlpha)
+            Spacer(Modifier.height(px(CONTROLS_GAP_PX)))
+            TransportButtons()
         }
     }
 
@@ -862,55 +917,27 @@ class NowPlayingScreen(
     }
 
 
-    /**
-     * The track, set where the cover would have been.
-     *
-     * With no artwork the header's small title card is the only thing on a black
-     * screen, and it reads as a caption for nothing. Moving it down into the
-     * cover's own panel and letting it grow makes the track the page's subject,
-     * which is what the cover was doing before.
-     */
     @Composable
-    private fun BoxScope.TitleBlock(current: Track) {
-        Box(
-            modifier = Modifier
-                .align(Alignment.TopStart)
-                .fillMaxSize()
-                .padding(bottom = px(PANEL_END_PX)),
-        ) {
-            Column(
-                modifier = Modifier.fillMaxSize().padding(horizontal = px(INSET_PX)),
-                verticalArrangement = Arrangement.Center,
-                horizontalAlignment = Alignment.CenterHorizontally,
-            ) {
-                // Artist above the song, album below it, both in the secondary
-                // weight — the credit first, then what you're hearing, then the
-                // record it came off.
-                HeroLine(current.artist, HERO_SIDE_PX, HERO_SIDE_LINE_PX, dim = true)
-                HeroLine(current.title, HERO_TITLE_PX, HERO_TITLE_LINE_PX, dim = false)
-                HeroLine(current.album, HERO_SIDE_PX, HERO_SIDE_LINE_PX, dim = true)
-            }
-        }
-    }
-
-    @Composable
-    private fun HeroLine(text: String, sizePx: Int, linePx: Int, dim: Boolean) {
+    private fun HeroLine(text: String, onClick: (() -> Unit)? = null) {
         if (text.isBlank()) return
         AppText(
             text,
-            pxSp(sizePx),
-            lineHeight = pxSp(linePx),
+            pxSp(HERO_LINE_PX),
+            lineHeight = pxSp(HERO_LINE_LINE_PX),
             role = TextRole.Subheading,
-            dim = dim,
+            dim = false,
             maxLines = 1,
             align = TextAlign.Center,
-            modifier = Modifier.fillMaxWidth().basicMarquee(),
+            modifier = Modifier
+                .fillMaxWidth()
+                .basicMarquee()
+                .let { if (onClick != null) it.appClickable(onClick = onClick) else it },
         )
     }
 
     /** Seek line and its clocks, both inset [INSET_PX] from either edge. */
     @Composable
-    private fun BoxScope.SeekBand(alpha: Float) {
+    private fun SeekBarAndTime(alpha: Float) {
         val position by App.playback.positionMs.collectAsState()
         val duration by App.playback.durationMs.collectAsState()
         var dragRatio by remember { mutableStateOf<Float?>(null) }
@@ -918,12 +945,11 @@ class NowPlayingScreen(
         val effectiveDuration = if (duration > 0) duration else 1L
         val ratio = dragRatio ?: (position.toFloat() / effectiveDuration).coerceIn(0f, 1f)
 
-        Band(BAR_UP_PX, BAR_HIT_PX) {
+        Column(modifier = Modifier.fillMaxWidth().alpha(alpha)) {
             Box(
                 modifier = Modifier
-                    .fillMaxSize()
-                    .padding(horizontal = px(INSET_PX))
-                    .alpha(alpha)
+                    .fillMaxWidth()
+                    .height(px(BAR_HIT_PX))
                     .pointerInput(duration) {
                         awaitEachGesture {
                             val down = awaitFirstDown()
@@ -944,14 +970,8 @@ class NowPlayingScreen(
             ) {
                 AppProgressBar(ratio)
             }
-        }
-
-        Band(TIME_UP_PX, TIME_ROW_PX) {
             Row(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(horizontal = px(INSET_PX))
-                    .alpha(alpha),
+                modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 AppText(
@@ -965,168 +985,110 @@ class NowPlayingScreen(
         }
     }
 
-    /**
-     * Rewind, play/pause, forward — full white, the only undimmed controls.
-     *
-     * Tried with output and queue at its edges and a bigger cover above, as a
-     * switchable layout; dropped — a busier transport bought little when the
-     * full-screen cover is one hold away.
-     */
+    /** Rewind, play/pause, forward — full white, the only undimmed controls. */
     @Composable
-    private fun BoxScope.TransportRow() {
+    private fun TransportButtons() {
         val isPlaying by App.playback.isPlaying.collectAsState()
-        Band(TRANSPORT_UP_PX, TRANSPORT_ROW_PX) {
-            Slot(SlotAt.FromStart(SIDE_X_PX)) {
-                ScrubButton(AppIcons.FastRewind, direction = -1, size = px(SEEK_BOX_PX)) {
-                    App.playback.previous()
-                }
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceEvenly,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            ScrubButton(AppIcons.FastRewind, direction = -1, size = px(SEEK_BOX_PX)) {
+                App.playback.previous()
             }
-            Slot(SlotAt.Centre, onClick = { App.playback.togglePlayPause() }) {
+            Box(
+                modifier = Modifier
+                    .size(px(TRANSPORT_TAP_PX))
+                    .appClickable { App.playback.togglePlayPause() },
+                contentAlignment = Alignment.Center,
+            ) {
                 AppIcon(
                     if (isPlaying) AppIcons.Pause else AppIcons.PlayArrow,
                     size = px(PLAY_BOX_PX),
                 )
             }
-            Slot(SlotAt.FromEnd(SIDE_X_PX)) {
-                ScrubButton(AppIcons.FastForward, direction = 1, size = px(SEEK_BOX_PX)) {
-                    App.playback.next()
-                }
+            ScrubButton(AppIcons.FastForward, direction = 1, size = px(SEEK_BOX_PX)) {
+                App.playback.next()
             }
         }
     }
 
     /**
-     * Add, cast and queue: one shared glyph size, all dimmed together.
-     *
-     * Lyrics used to hold the left slot and now lives in the ••• sheet — it is
-     * something you go and read, not something you reach for mid-track.
+     * Shuffle and repeat, ported from Light Music's own player bottom bar
+     * exactly: its icons, its full width, its underline, its "1" badge for
+     * repeat-one — not this app's Material icon set or its dimming rules.
      */
     @Composable
-    private fun BoxScope.SecondaryRow(current: Track, alpha: Float) {
-        val size = px(SECONDARY_BOX_PX)
-        val libraryTracks by App.library.tracks.collectAsState()
-        val liked = libraryTracks.firstOrNull { it.id == current.id }?.liked ?: current.liked
-        val source by App.source.collectAsState()
-        // Everything behind "+" is a way of filing the track somewhere. On a
-        // source with nowhere to file it, the button opens an empty sheet — so
-        // it isn't there.
-        val canFile = source.supportsLikes || source.supportsPlaylists ||
-            source.supportsRatings || source.supportsDownloads
+    private fun SecondaryRow() {
+        val shuffle by App.playback.shuffle.collectAsState()
+        val repeat by App.playback.repeatMode.collectAsState()
 
-        Band(SECONDARY_UP_PX, SECONDARY_ROW_PX) {
-            // "+" rather than a heart: liking is one of several things you might
-            // want to file this track under, and the row has one slot for them.
-            // Ringed once it *is* liked — the same glyph, so the button doesn't
-            // change meaning, with a mark to say the track is already filed.
-            if (canFile) {
-                Slot(SlotAt.FromStart(SIDE_X_PX), onClick = { go { AddActionsScreen(it, current.id) } }) {
-                    AppIcon(
-                        if (liked) AppIcons.AddCircle else AppIcons.Add,
-                        size = size,
-                        modifier = Modifier.alpha(alpha),
-                    )
-                }
-            }
-            Slot(SlotAt.Centre, onClick = { openOutput() }) {
-                AppIcon(AppIcons.Cast, size = size, modifier = Modifier.alpha(alpha))
-            }
-            Slot(
-                SlotAt.FromEnd(SIDE_X_PX),
-                onClick = { NowPlayingNav.view.value = nextView(NowPlayingNav.view.value) },
-            ) {
-                // On the queue, the glyph inverts — black lines in a white tile —
-                // rather than brightening: it is the only one of these three with
-                // a state, and inverting says "you are here" without breaking the
-                // row's shared opacity. The alpha wraps the pair, so tile and
-                // lines fade together and the white never reads as a lit button.
-                val onQueue = NowPlayingNav.view.value == NpView.QUEUE
-                Box(
-                    modifier = Modifier
-                        .alpha(alpha)
-                        .size(px(QUEUE_TILE_PX))
-                        .then(
-                            if (onQueue) {
-                                Modifier
-                                    .clip(RoundedCornerShape(px(QUEUE_TILE_RADIUS_PX)))
-                                    .background(LightThemeTokens.colors.content)
-                            } else {
-                                Modifier
-                            },
-                        ),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    AppIcon(
-                        AppIcons.FormatListBulleted,
-                        size = size,
-                        tint = if (onQueue) {
-                            LightThemeTokens.colors.background
-                        } else {
-                            LightThemeTokens.colors.content
-                        },
-                    )
-                }
-            }
-        }
-    }
-
-    /**
-     * A full-width band whose *centre* lands [centreUpPx] above the bottom of the
-     * screen. Bottom-anchored, so the depths in the design survive any change to
-     * what is above them.
-     */
-    @Composable
-    private fun BoxScope.Band(
-        centreUpPx: Int,
-        heightPx: Int,
-        content: @Composable BoxScope.() -> Unit,
-    ) {
-        Box(
+        Row(
             modifier = Modifier
-                .align(Alignment.BottomStart)
-                .offset(y = -px(centreUpPx - heightPx / 2))
                 .fillMaxWidth()
-                .height(px(heightPx)),
-            content = content,
-        )
-    }
-
-    /** Where a [Slot] sits across its band: a distance in from either edge, or the middle. */
-    private sealed interface SlotAt {
-        data class FromStart(val px: Int) : SlotAt
-        data class FromEnd(val px: Int) : SlotAt
-        data object Centre : SlotAt
-    }
-
-    /**
-     * A control centred within a [Band] at [at].
-     *
-     * Anchored to an edge or to the centre rather than put at an x across the
-     * screen, so the right-hand control mirrors the left on any width without
-     * the screen's own width appearing anywhere in the arithmetic.
-     */
-    @Composable
-    private fun BoxScope.Slot(
-        at: SlotAt,
-        onClick: (() -> Unit)? = null,
-        content: @Composable () -> Unit,
-    ) {
-        val place = when (at) {
-            is SlotAt.FromStart ->
-                Modifier.align(Alignment.CenterStart).offset(x = px(at.px - SLOT_W_PX / 2))
-            is SlotAt.FromEnd ->
-                Modifier.align(Alignment.CenterEnd).offset(x = -px(at.px - SLOT_W_PX / 2))
-            SlotAt.Centre -> Modifier.align(Alignment.Center)
-        }
-        Box(
-            modifier = place
-                .width(px(SLOT_W_PX))
-                .fillMaxHeight()
-                // The click belongs to the slot, not the glyph: hung off the icon
-                // it would shrink the target to the drawn size.
-                .let { if (onClick != null) it.appClickable(onClick = onClick) else it },
-            contentAlignment = Alignment.Center,
+                .height(px(SECONDARY_ROW_PX))
+                .padding(horizontal = 2f.gridUnitsAsDp()),
+            verticalAlignment = Alignment.CenterVertically,
         ) {
-            content()
+            Box(Modifier.weight(1f), contentAlignment = Alignment.CenterStart) {
+                UnderlinedIconButton(
+                    icon = LightIcons.SHUFFLE,
+                    underlined = shuffle,
+                    contentDescription = if (shuffle) "Shuffle on" else "Shuffle off",
+                    onClick = { App.playback.toggleShuffle() },
+                )
+            }
+            Box(Modifier.weight(1f))
+            Box(Modifier.weight(1f), contentAlignment = Alignment.CenterEnd) {
+                RepeatButton(mode = repeat, onClick = { App.playback.cycleRepeat() })
+            }
+        }
+    }
+
+    /** Light Music's repeat button: the loop glyph, ringed with a "1" in repeat-one. */
+    @Composable
+    private fun RepeatButton(mode: RepeatMode, onClick: () -> Unit) {
+        Box(modifier = Modifier.lightClickable(onClick = onClick)) {
+            UnderlinedIconButton(
+                icon = LightIcons.LOOP,
+                underlined = mode != RepeatMode.OFF,
+                contentDescription = "Repeat: ${mode.name.lowercase()}",
+                onClick = null,
+            )
+            if (mode == RepeatMode.TRACK) {
+                LightText(
+                    text = "1",
+                    variant = LightTextVariant.Superfine,
+                    modifier = Modifier
+                        .align(Alignment.BottomEnd)
+                        .offset(y = (-4).dp, x = 3.dp)
+                        .background(LightThemeTokens.colors.background, CircleShape)
+                        .padding(horizontal = 3.dp, vertical = 0.75.dp),
+                )
+            }
+        }
+    }
+
+    /** An icon with an optional underline beneath it (icon-width) — Light Music's own. */
+    @Composable
+    private fun UnderlinedIconButton(
+        icon: LightIconConfiguration,
+        underlined: Boolean,
+        contentDescription: String,
+        onClick: (() -> Unit)?,
+    ) {
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            modifier = if (onClick != null) Modifier.lightClickable(onClick = onClick) else Modifier,
+        ) {
+            LightIcon(icon = icon, size = BOTTOM_BAR_ICON_UNITS, contentDescription = contentDescription)
+            Box(
+                Modifier
+                    .width(BOTTOM_BAR_ICON_UNITS.gridUnitsAsDp())
+                    .height(2.dp)
+                    .background(if (underlined) LightThemeTokens.colors.content else Color.Transparent),
+            )
         }
     }
 
@@ -1145,10 +1107,6 @@ class NowPlayingScreen(
                 it,
                 trackId,
                 followCurrent = true,
-                showLike = false,
-                showDownload = false,
-                showRating = false,
-                showAddToPlaylist = false,
                 // Only worth offering when there is a cover to enlarge; with
                 // artwork off there is nothing to show.
                 //
@@ -1170,12 +1128,11 @@ class NowPlayingScreen(
                     null
                 },
                 artworkShowing = coverOnly,
-                lyricsShowing = NowPlayingNav.lyricsOverlay.value,
-                onToggleLyrics = {
-                    val show = !NowPlayingNav.lyricsOverlay.value
-                    NowPlayingNav.lyricsOverlay.value = show
-                    if (show) NowPlayingNav.view.value = NpView.ARTWORK
-                },
+                // The "+" sheet's two remaining jobs, now that it's gone —
+                // everything else it did (like, rating, playlists, downloads)
+                // is already a row here with the defaults restored above.
+                onOutput = { goBack(); openOutput() },
+                onQueue = { goBack(); NowPlayingNav.view.value = NpView.QUEUE },
             )
         }
     }
@@ -1211,24 +1168,23 @@ class NowPlayingScreen(
 private const val TIME_PX = 36
 
 /**
- * The block that stands in for the cover when artwork is off.
- *
- * One step up from where it started (72/45): with the whole square to itself and
- * nothing else on the page, the smaller setting read as a caption for a missing
- * picture rather than as the thing the page is about.
+ * The block that stands in for the cover when artwork is off: artist, album and
+ * title, one size throughout so none of the three reads as a caption for the
+ * others — see [HeroLine].
  */
-private const val HERO_TITLE_PX = LightType.HEADING_PX
-private const val HERO_TITLE_LINE_PX = LightType.HEADING_LINE_PX
-private const val HERO_SIDE_PX = LightType.FINE_PX
-private const val HERO_SIDE_LINE_PX = LightType.FINE_LINE_PX
+private const val HERO_LINE_PX = LightType.FINE_PX
+private const val HERO_LINE_LINE_PX = LightType.FINE_LINE_PX
+
+/** Room between the three lines — wide enough that they read as separate facts. */
+private const val HERO_GAP_PX = 24
 
 /**
  * What the controls take at the foot of the player; the panel the lyrics and a
  * small cover fill is everything above it. Clears the seek line's band, which
- * starts 400px up, by a little. The queue page has no controls to clear, so it
+ * starts 740px up, by a little. The queue page has no controls to clear, so it
  * runs deeper — see [QUEUE_END_PX].
  */
-private const val PANEL_END_PX = 420
+private const val PANEL_END_PX = 760
 
 /** The queue list's bounds: between the header and the shuffle/repeat bar. */
 private const val QUEUE_TOP_PX = HEADER_BAR_PX
@@ -1239,25 +1195,16 @@ private const val UNDERLINE_GAP_PX = 3
 private const val UNDERLINE_W_PX = 51
 private const val UNDERLINE_H_PX = 3
 
-/** Depths above the bottom of the screen. */
-private const val BAR_UP_PX = 360
-private const val TIME_UP_PX = 320
-private const val TRANSPORT_UP_PX = 240
-private const val SECONDARY_UP_PX = 120
-
-/**
- * Band heights, sized so the touchable ones tile without overlapping: the seek
- * line owns 320–400, the transport 170–310 and the secondary row 70–170.
- */
+/** The seek line's own touch height, and the row's height at the foot of the player. */
 private const val BAR_HIT_PX = 80
-private const val TIME_ROW_PX = 44
-private const val TRANSPORT_ROW_PX = 140
 private const val SECONDARY_ROW_PX = 100
 
-/** Horizontal placement: outer controls 280px in, clocks and seek line 80px in. */
-private const val SIDE_X_PX = 280
+/** The centred group's own side margin, and the gap between its three sections. */
 private const val INSET_PX = 80
-private const val SLOT_W_PX = 200
+private const val CONTROLS_GAP_PX = 60
+
+/** A transport button's tap target — generous beyond the icon it centres. */
+private const val TRANSPORT_TAP_PX = 200
 
 /**
  * Icon boxes, in physical pixels and every one a multiple of 3 — so each is a
@@ -1266,29 +1213,26 @@ private const val SLOT_W_PX = 200
  * pixel wide.
  *
  * The ink is smaller than its box: play and pause fill 14/24 of it, the double
- * arrows 12/24, the bottom row's glyphs 18/24. The comments give what a ruler
- * finds on screen.
+ * arrows 12/24. The comments give what a ruler finds on screen.
  */
-private const val PLAY_BOX_PX = 138      // 80px of ink
-private const val SEEK_BOX_PX = 114      // 57px
-private const val SECONDARY_BOX_PX = 54  
+private const val PLAY_BOX_PX = 102      // 60px of ink
+private const val SEEK_BOX_PX = 84       // 42px
 /** The queue header's second line — the card's own second line, which it sits beside. */
 private const val QUEUE_SUBTITLE_PX = 36
 private const val QUEUE_SUBTITLE_LINE_PX = 42
 
 /**
- * Shuffle and repeat at the foot of the queue, sized off the Light music app's
- * own pair rather than off this header's other glyphs — they are the page's only
+ * Shuffle and repeat on the queue header, sized off the Light Music app's own
+ * pair rather than off this header's other glyphs — they are the page's only
  * controls, and at header size they read as an afterthought.
  */
 private const val QUEUE_TOGGLE_ICON_PX = 90
 
-/** The tile the queue glyph inverts into while that page is on screen. */
-private const val QUEUE_TILE_PX = 66
-private const val QUEUE_TILE_RADIUS_PX = 6
-
-/** Transport is full white; everything else on black is knocked back. */
-private const val DIM_ALPHA = 0.45f
+/**
+ * Shuffle and repeat on the player's own bottom bar — Light Music's exact
+ * grid-unit size for the same pair, ported along with the rest of that bar.
+ */
+private const val BOTTOM_BAR_ICON_UNITS = 2f
 
 /**
  * The same controls once they are standing on a sleeve rather than on black.
@@ -1304,11 +1248,11 @@ private const val ON_COVER_ALPHA = 0.75f
  * The wash under the controls in Cover Only, and how solid it gets at the very
  * bottom of it.
  *
- * 520px clears the topmost control — the seek line's band starts 400px up — so
+ * 860px clears the topmost control — the seek line's band starts 740px up — so
  * the gradient has run out before it reaches anything, rather than stopping
  * against an edge you can see.
  */
-private const val SCRIM_H_PX = 520
+private const val SCRIM_H_PX = 860
 private const val SCRIM_ALPHA = 0.82f
 
 

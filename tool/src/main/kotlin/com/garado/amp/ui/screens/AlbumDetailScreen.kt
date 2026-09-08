@@ -91,7 +91,7 @@ class AlbumDetailScreen(
                         // queue, playlist, artist. Same menu as a long-press on
                         // the album's row, reachable from the album itself.
                         rightAction = HeaderAction(
-                            AppIcons.MoreVert,
+                            AppIcons.MoreHoriz,
                             onLongClick = { go { SettingsScreen(it) } },
                         ) {
                             go { AlbumActionsScreen(it, albumId) }

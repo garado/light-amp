@@ -30,26 +30,10 @@ class TrackActionsScreen(
      * artwork — acting on the previous one.
      */
     private val followCurrent: Boolean = false,
-    // When set (opened from Now Playing), the lyrics row toggles the in-place
-    // overlay on that screen instead of pushing a standalone lyrics screen.
-    private val onToggleLyrics: (() -> Unit)? = null,
-    private val lyricsShowing: Boolean = false,
-    /**
-     * Cleared by the player and the queue, where liking has its own control on
-     * screen and a menu row for it would just be a second way to say the same.
-     */
     private val showLike: Boolean = true,
-    /**
-     * Cleared by the player and the queue: what is playing is already downloaded
-     * or already streaming, and managing storage is a library job.
-     */
+    /** Cleared by the queue: what's queued is already downloaded or already streaming. */
     private val showDownload: Boolean = true,
-    /**
-     * Cleared by the player, where rating and playlists live behind its "+"
-     * button — the same action in two menus on one screen is one too many.
-     */
     private val showRating: Boolean = true,
-    /** Cleared by the player for the same reason as [showRating]. */
     private val showAddToPlaylist: Boolean = true,
     /** Set by the player; a cover at full width is only about what's playing. */
     private val onShowArtwork: (() -> Unit)? = null,
@@ -68,6 +52,10 @@ class TrackActionsScreen(
     private val onSelect: (() -> Unit)? = null,
     // When set (opened from a playlist detail), adds a "Remove from Playlist" row.
     private val onRemoveFromPlaylist: (() -> Unit)? = null,
+    /** Set by the player, whose bottom bar no longer has a cast button of its own. */
+    private val onOutput: (() -> Unit)? = null,
+    /** Set by the player, whose bottom bar no longer has a queue button of its own. */
+    private val onQueue: (() -> Unit)? = null,
 ) : SimpleLightScreen<Unit>(sealed) {
 
     // While casting, the rocker belongs to the speaker — see handleVolumeKey.
@@ -204,22 +192,23 @@ class TrackActionsScreen(
                         }
                     }
                 }
-                // Lyrics and the full cover belong to the track you're listening
-                // to: both are things to look at *while* it plays, and only the
-                // player can put them where they make sense. Elsewhere they were
-                // a screen of words about a song that wasn't playing.
-                if (onToggleLyrics != null) {
-                    TextRow(title = if (lyricsShowing) "Hide Lyrics" else "Show Lyrics") {
-                        onToggleLyrics.invoke()
-                        goBack()
-                    }
-                }
+                // The full cover belongs to the track you're listening to: it's
+                // something to look at *while* it plays, and only the player can
+                // put it where that makes sense.
                 if (onShowArtwork != null) {
                     TextRow(
                         title = if (artworkShowing) "Hide Full Artwork" else "Show Full Artwork",
                     ) {
                         onShowArtwork.invoke()
                     }
+                }
+                // Output and Queue: the player's own bottom bar is shuffle and
+                // repeat now, so these two moved in here alongside it.
+                if (onOutput != null) {
+                    TextRow(title = "Output") { onOutput.invoke() }
+                }
+                if (onQueue != null) {
+                    TextRow(title = "Queue") { onQueue.invoke() }
                 }
                 // Beside the rating: both say what you think of the track, and
                 // reading "Like" next to "Rating" is how you tell them apart.
