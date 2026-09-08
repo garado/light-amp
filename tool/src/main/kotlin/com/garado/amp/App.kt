@@ -694,6 +694,16 @@ object App {
     }
 
     /**
+     * The artwork setting itself, as state rather than a preferences Flow — see
+     * [AppSettings.artwork]. Eager for the same reason as [layoutMode]: the
+     * player reads it to choose its whole layout, and a plain Flow would show
+     * the wrong one for a frame on the way to every page.
+     */
+    val artworkMode: StateFlow<ArtworkMode> by lazy {
+        settings.artwork.stateIn(scope, SharingStarted.Eagerly, ArtworkMode.SMALL)
+    }
+
+    /**
      * Read by both album lists — see [AppSettings.albumGrid]. False whenever
      * artwork is off, since the grid is nothing but artwork.
      */

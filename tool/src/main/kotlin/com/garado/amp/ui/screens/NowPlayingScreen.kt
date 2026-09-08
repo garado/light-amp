@@ -523,7 +523,7 @@ class NowPlayingScreen(
      */
     @Composable
     private fun ArtPlayer(current: Track) {
-        val artwork by App.settings.artwork.collectAsState(initial = ArtworkMode.SMALL)
+        val artwork by App.artworkMode.collectAsState()
         // The words want the whole panel, so the title goes back to the header
         // it came from rather than sitting behind them.
         val heroTitle = artwork == ArtworkMode.NONE && !NowPlayingNav.lyricsOverlay.value
