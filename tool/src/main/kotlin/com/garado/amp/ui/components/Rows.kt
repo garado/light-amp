@@ -33,7 +33,6 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalDensity
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.garado.amp.App
@@ -465,26 +464,15 @@ private const val NUMBERED_TITLE_PX = 48
 private const val NUMBERED_TITLE_LINE_PX = 60
 private const val NUMBERED_SUB_PX = 36
 private const val NUMBERED_SUB_LINE_PX = 45
-/**
- * Two lines under the title where a record gives one — who plays on the song,
- * then how long it runs — so the row is as tall as the type in it.
- */
-private const val NUMBERED_ROW_H_PX = 132
-private const val NUMBERED_ROW_TALL_PX = 177
-/** Air between a number's right edge and the title axis it sets against. */
+/** A row with just the title, which is most of them now the number is inline. */
+private const val NUMBERED_ROW_H_PX = 96
+
+/** A row that also carries a subtitle — who plays on the song. */
+private const val NUMBERED_ROW_TALL_PX = 141
+/** Air between the waveform/selection icon and the title that follows it. */
 private const val NUMBER_GAP_PX = 15
 
-/**
- * The number gutter: three digits of [NUMBERED_SUB_PX] type plus
- * [NUMBER_GAP_PX], and one width for every album. This page briefly borrowed
- * the lists' 51px leading slot so titles would share their 72px axis, but a
- * number only fit it shrunken and hard against the title, which read as
- * cramped. The album page owns a wider axis of its own instead, the way a
- * printed tracklist hangs its numbers in a margin cut to the widest of them.
- */
-private const val NUMBERED_LEAD_PX = 78
-
-/** Track number (or now-playing icon when current) + title + a line under it. */
+/** Title (with its track number inline) — plus a now-playing or selection icon before it, where there is one. */
 @Composable
 fun NumberedRow(
     number: Int?,
@@ -495,8 +483,6 @@ fun NumberedRow(
      * when it says something the page hasn't — see AlbumDetailScreen.
      */
     subtitle: String,
-    /** A second line under that, where there is one. */
-    detail: String? = null,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
     current: Boolean = false,
@@ -504,26 +490,25 @@ fun NumberedRow(
     /** Selection state, or null when the list isn't in multi-select mode. */
     selected: Boolean? = null,
 ) {
-    val subLines = (if (subtitle.isNotBlank()) 1 else 0) + (if (detail != null) 1 else 0)
     Row(
         modifier = modifier
             .fillMaxWidth()
-            .height(px(if (subLines >= 2) NUMBERED_ROW_TALL_PX else NUMBERED_ROW_H_PX))
+            // Most rows are the title alone now that the number lives in it
+            // and duration is gone — only a row with its own subtitle needs
+            // the taller pitch.
+            .height(px(if (subtitle.isNotBlank()) NUMBERED_ROW_TALL_PX else NUMBERED_ROW_H_PX))
             .rowClickable(onClick = onClick, onLongClick = onLongClick),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        // The number hangs in the gutter, right-aligned the way a printed
-        // tracklist sets its numbers — 9 and 10 end on the same edge — and the
-        // waveform or selection circle takes the number's place, not a slot
-        // beside it.
-        Box(
-            modifier = Modifier
-                .width(px(NUMBERED_LEAD_PX))
-                .padding(end = px(NUMBER_GAP_PX)),
-            contentAlignment = Alignment.CenterEnd,
-        ) {
-            when {
-                selected != null -> AppIcon(
+        // No reserved gutter: the number moved into the title, so a plain row
+        // starts at the same 72px axis every other list's titles do — just a
+        // spacer, not a slot. Only a row that's current or being selected gets
+        // an icon before its text instead, and that one row's title lands
+        // wherever the icon and its gap happen to end, which is the trade the
+        // icon is worth.
+        when {
+            selected != null -> {
+                AppIcon(
                     if (selected) AppIcons.Selected else AppIcons.Unselected,
                     size = px(41),
                     tint = if (selected) {
@@ -532,16 +517,13 @@ fun NumberedRow(
                         LightThemeTokens.colors.contentSecondary
                     },
                 )
-                current -> AppIcon(AppIcons.Waveform, size = px(41))
-                else -> AppText(
-                    number?.toString() ?: "",
-                    pxSp(NUMBERED_SUB_PX),
-                    lineHeight = pxSp(NUMBERED_SUB_LINE_PX),
-                    role = TextRole.Detail,
-                    dim = true,
-                    align = TextAlign.End,
-                )
+                Spacer(Modifier.width(px(NUMBER_GAP_PX)))
             }
+            current -> {
+                AppIcon(AppIcons.Waveform, size = px(41))
+                Spacer(Modifier.width(px(NUMBER_GAP_PX)))
+            }
+            else -> Spacer(Modifier.width(px(ROW_LEAD_PX)))
         }
         // Under the title rather than across the row, which leaves long titles
         // the whole width instead of a column of them truncating short of a
@@ -551,7 +533,7 @@ fun NumberedRow(
         // to read to learn nothing.
         Column(modifier = Modifier.weight(1f)) {
             AppText(
-                title,
+                if (number != null) "$number. $title" else title,
                 pxSp(NUMBERED_TITLE_PX),
                 lineHeight = pxSp(NUMBERED_TITLE_LINE_PX),
                 maxLines = 1,
@@ -561,16 +543,6 @@ fun NumberedRow(
                     subtitle,
                     pxSp(NUMBERED_SUB_PX),
                     lineHeight = pxSp(NUMBERED_SUB_LINE_PX),
-                    dim = true,
-                    maxLines = 1,
-                )
-            }
-            if (detail != null) {
-                AppText(
-                    detail,
-                    pxSp(NUMBERED_SUB_PX),
-                    lineHeight = pxSp(NUMBERED_SUB_LINE_PX),
-                    dim = true,
                     maxLines = 1,
                 )
             }
