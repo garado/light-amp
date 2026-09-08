@@ -78,6 +78,7 @@ import com.garado.amp.ui.components.SelectionHeader
 import com.garado.amp.ui.components.TrackRow
 import com.garado.amp.ui.px
 import com.garado.amp.ui.pxSp
+import com.thelightphone.sdk.ui.LightIcons
 import com.thelightphone.sdk.ui.LightThemeTokens
 import com.garado.amp.ui.components.appClickable
 import androidx.compose.foundation.layout.Spacer
@@ -653,7 +654,7 @@ private fun AlbumsTab(actions: ShellActions, header: Boolean = true) {
  */
 @Composable
 private fun RandomAlbumRow(albums: List<Album>, actions: ShellActions) {
-    PlayAllRow(AppIcons.Shuffle, "Play Random Album") {
+    PlayAllRow(LightIcons.SHUFFLE, "Play Random Album") {
         val album = albums.randomOrNull() ?: return@PlayAllRow
         App.scope.launch {
             // Reading the album's tracks is a database call and belongs off the
@@ -752,7 +753,7 @@ private fun SongsTab(actions: ShellActions, header: Boolean = true) {
         ) {
             if (!selection.active) {
                 item {
-                    PlayAllRow(AppIcons.Shuffle, "Shuffle") {
+                    PlayAllRow(LightIcons.SHUFFLE, "Shuffle") {
                         App.playback.playQueue(shuffled(sorted), 0)
                         actions.nowPlaying()
                     }

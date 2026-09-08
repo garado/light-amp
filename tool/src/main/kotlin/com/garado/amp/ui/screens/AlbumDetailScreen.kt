@@ -18,6 +18,7 @@ import com.garado.amp.data.shuffled
 import com.garado.amp.ui.components.AppHeader
 import com.garado.amp.ui.components.formatTime
 import com.garado.amp.ui.components.AppIcons
+import com.thelightphone.sdk.ui.LightIcons
 import com.garado.amp.ui.components.LibraryList
 import com.garado.amp.ui.components.AppText
 import com.garado.amp.ui.components.NumberedRow
@@ -219,7 +220,7 @@ class AlbumDetailScreen(
                         Spacer(Modifier.width(px(CARD_ICON_GAP_PX)))
                     }
                     AppIcon(
-                        AppIcons.Shuffle,
+                        LightIcons.SHUFFLE,
                         size = px(CARD_ICON_PX),
                         modifier = Modifier.appClickable {
                             App.playback.playQueue(shuffled(tracks), 0)

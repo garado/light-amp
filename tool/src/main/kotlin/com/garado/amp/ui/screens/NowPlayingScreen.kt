@@ -769,7 +769,7 @@ class NowPlayingScreen(
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 HeaderSlot {
-                    HeaderToggle(AppIcons.Shuffle, active = shuffle) { App.playback.toggleShuffle() }
+                    HeaderToggle(LightIcons.SHUFFLE, active = shuffle) { App.playback.toggleShuffle() }
                 }
                 Spacer(Modifier.weight(1f))
                 HeaderSlot {
@@ -831,12 +831,23 @@ class NowPlayingScreen(
      */
     @Composable
     private fun HeaderToggle(icon: ImageVector, active: Boolean, onClick: () -> Unit) {
+        HeaderToggle(active, onClick) { AppIcon(icon, size = px(QUEUE_TOGGLE_ICON_PX)) }
+    }
+
+    /** Same toggle, for a LightOS glyph — Light Music's own shuffle, not this app's Material one. */
+    @Composable
+    private fun HeaderToggle(icon: LightIconConfiguration, active: Boolean, onClick: () -> Unit) {
+        HeaderToggle(active, onClick) { AppIcon(icon, size = px(QUEUE_TOGGLE_ICON_PX)) }
+    }
+
+    @Composable
+    private fun HeaderToggle(active: Boolean, onClick: () -> Unit, icon: @Composable () -> Unit) {
         Column(
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.Center,
             modifier = Modifier.size(px(HEADER_BAR_PX)).appClickable(onClick = onClick),
         ) {
-            AppIcon(icon, size = px(QUEUE_TOGGLE_ICON_PX))
+            icon()
             Box(
                 modifier = Modifier
                     .padding(top = px(UNDERLINE_GAP_PX))

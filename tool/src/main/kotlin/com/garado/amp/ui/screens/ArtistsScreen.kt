@@ -19,6 +19,7 @@ import com.garado.amp.data.Track
 import com.garado.amp.data.shuffled
 import com.garado.amp.ui.components.AppHeader
 import com.garado.amp.ui.components.AppIcons
+import com.thelightphone.sdk.ui.LightIcons
 import com.garado.amp.ui.components.EmptyState
 import com.garado.amp.ui.components.SelectionHeader
 import com.garado.amp.ui.components.AppText
@@ -236,7 +237,7 @@ class ArtistTopSongsScreen(
                 ) {
                     if (!selection.active) {
                         item {
-                            PlayAllRow(AppIcons.Shuffle, "Shuffle") {
+                            PlayAllRow(LightIcons.SHUFFLE, "Shuffle") {
                                 App.playback.playQueue(shuffled(list), 0)
                                 go { NowPlayingScreen(it) }
                             }
@@ -302,7 +303,7 @@ class ArtistSongsScreen(
             ) {
                 if (!selection.active) {
                     item {
-                        PlayAllRow(AppIcons.Shuffle, "Shuffle") {
+                        PlayAllRow(LightIcons.SHUFFLE, "Shuffle") {
                             App.playback.playQueue(shuffled(songs), 0)
                             go { NowPlayingScreen(it) }
                         }

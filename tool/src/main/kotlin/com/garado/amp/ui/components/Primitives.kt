@@ -47,7 +47,6 @@ import androidx.compose.material.icons.filled.Repeat
 import androidx.compose.material.icons.filled.RepeatOne
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
-import androidx.compose.material.icons.filled.Shuffle
 import androidx.compose.material.icons.filled.Whatshot
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
@@ -56,6 +55,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -65,6 +65,7 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.sp
 import com.garado.amp.ui.px
+import com.thelightphone.sdk.ui.LightIconConfiguration
 import com.thelightphone.sdk.ui.LightProgressBar
 import com.thelightphone.sdk.ui.LightThemeTokens
 
@@ -110,7 +111,6 @@ object AppIcons {
     val Sort = Icons.AutoMirrored.Filled.Sort
     val Favorite = Icons.Filled.Favorite
     val FavoriteBorder = Icons.Filled.FavoriteBorder
-    val Shuffle = Icons.Filled.Shuffle
     val PlayArrow = Icons.Filled.PlayArrow
     val Pause = Icons.Filled.Pause
     val FastRewind = Icons.Filled.FastRewind
@@ -163,6 +163,22 @@ fun AppIcon(
 ) {
     Icon(
         imageVector = icon,
+        contentDescription = null,
+        tint = tint,
+        modifier = modifier.size(size),
+    )
+}
+
+/** Same shape, for a LightOS glyph — Light Music's own icon set, not this app's Material one. */
+@Composable
+fun AppIcon(
+    icon: LightIconConfiguration,
+    modifier: Modifier = Modifier,
+    size: Dp = px(71),
+    tint: Color = LightThemeTokens.colors.content,
+) {
+    Icon(
+        painter = painterResource(icon.drawableResource),
         contentDescription = null,
         tint = tint,
         modifier = modifier.size(size),

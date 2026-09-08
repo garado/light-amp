@@ -41,6 +41,7 @@ import com.garado.amp.data.SourceKind
 import com.garado.amp.ui.CANVAS_W_PX
 import com.garado.amp.ui.px
 import com.garado.amp.ui.pxSp
+import com.thelightphone.sdk.ui.LightIconConfiguration
 import com.thelightphone.sdk.ui.LightThemeTokens
 
 @Composable
@@ -322,6 +323,27 @@ fun PlayAllRow(
     modifier: Modifier = Modifier,
     onClick: () -> Unit,
 ) {
+    PlayAllRow(label, modifier, onClick) { AppIcon(icon, size = px(ROW_ACTION_ICON_PX)) }
+}
+
+/** Same row, for a LightOS glyph — Light Music's own shuffle, not this app's Material one. */
+@Composable
+fun PlayAllRow(
+    icon: LightIconConfiguration,
+    label: String,
+    modifier: Modifier = Modifier,
+    onClick: () -> Unit,
+) {
+    PlayAllRow(label, modifier, onClick) { AppIcon(icon, size = px(ROW_ACTION_ICON_PX)) }
+}
+
+@Composable
+private fun PlayAllRow(
+    label: String,
+    modifier: Modifier,
+    onClick: () -> Unit,
+    icon: @Composable () -> Unit,
+) {
     Row(
         modifier = modifier
             .fillMaxWidth()
@@ -336,7 +358,7 @@ fun PlayAllRow(
         // left edge, which is also where titles start when covers are off. An
         // action row is a line of the list, not a row with an empty sleeve.
         Spacer(Modifier.width(px(ROW_LEAD_PX)))
-        AppIcon(icon, size = px(ROW_ACTION_ICON_PX))
+        icon()
         Spacer(Modifier.width(px(ROW_GAP_PX)))
         // Not TextRole.Button: the LP3's button style is Bold at 0.15em, which on a
         // full-width row label reads as shouty rather than as Light's restraint.

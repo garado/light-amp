@@ -50,6 +50,7 @@ import com.garado.amp.ui.components.ROW_TITLE_PX
 import com.garado.amp.ui.px
 import com.thelightphone.sdk.SealedLightActivity
 import com.thelightphone.sdk.SimpleLightScreen
+import com.thelightphone.sdk.ui.LightIcons
 import com.thelightphone.sdk.ui.LightThemeTokens
 import kotlin.math.roundToInt
 import kotlinx.coroutines.launch
@@ -147,7 +148,7 @@ class PlaylistDetailScreen(
             ) {
             if (!editing) {
                 item {
-                    PlayAllRow(AppIcons.Shuffle, "Shuffle") {
+                    PlayAllRow(LightIcons.SHUFFLE, "Shuffle") {
                         App.playback.playQueue(shuffled(list), 0)
                         go { NowPlayingScreen(it) }
                     }
