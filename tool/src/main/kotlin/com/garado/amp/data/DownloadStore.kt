@@ -117,7 +117,8 @@ class DownloadStore(private val filesDir: File) {
                     val kbPerSec = bytes * 1000 / elapsedMs / 1024
                     Log.i(TAG, "downloaded $bytes bytes in ${elapsedMs}ms (${kbPerSec} KB/s) $trackId")
                 }
-                if (partial.length() == 0L) {
+                if (partial.length() < MIN_PLAUSIBLE_BYTES) {
+                    lastError = "Got ${partial.length()} bytes for ${target.name}, discarding"
                     partial.delete()
                     return@withContext null
                 }
@@ -272,6 +273,10 @@ class DownloadStore(private val filesDir: File) {
         private const val CONNECT_TIMEOUT_MS = 15_000
         private const val READ_TIMEOUT_MS = 30_000
         private const val PART_SUFFIX = ".part"
+        // A real track is never this small; a transcode that failed server-side
+        // (e.g. ffmpeg choking on a file) can still come back HTTP 200 with a
+        // tiny body, which used to get saved as a "successful" download.
+        private const val MIN_PLAUSIBLE_BYTES = 8 * 1024
         // 64 GB is reachable on the LP3's 128 GB of storage only if we're willing
         // to claim more than half of what's free, so the share goes up with the
         // ceiling; a quarter of free space still stays behind for the OS and the
