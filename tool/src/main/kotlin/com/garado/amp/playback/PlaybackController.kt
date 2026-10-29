@@ -2830,7 +2830,10 @@ class PlaybackController(
         if (track.id == nowPlayingId) return
         nowPlayingId = track.id
         val client = serverClient.value ?: return
-        scope.launch { runCatching { client.scrobble(track.id, submission = false) } }
+        scope.launch {
+            runCatching { client.scrobble(track.id, submission = false) }
+                .onFailure { android.util.Log.w("AmpNowPlaying", "announce failed for ${track.id}", it) }
+        }
     }
 
     /**

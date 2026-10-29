@@ -36,7 +36,8 @@ data class SubsonicConfig(
     }
 }
 
-class SubsonicException(message: String) : Exception(message)
+/** [code] is the Subsonic API error code (0 when there wasn't one to carry — an HTTP-level or decode failure). */
+class SubsonicException(message: String, val code: Int = 0) : Exception(message)
 
 /**
  * Navidrome / Subsonic API client. Ported from the React Native `navidrome.ts`.
@@ -163,7 +164,7 @@ class SubsonicClient(val config: SubsonicConfig) : MusicServer {
         val body = json.decodeFromString<SubsonicEnvelope>(response.bodyAsText()).response
             ?: throw SubsonicException("Unexpected response from server.")
         if (body.status != "ok") {
-            throw SubsonicException(body.error?.message ?: "Request failed.")
+            throw SubsonicException(body.error?.message ?: "Request failed.", body.error?.code ?: 0)
         }
         return body
     }

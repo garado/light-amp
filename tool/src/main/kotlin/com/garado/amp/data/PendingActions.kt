@@ -85,21 +85,30 @@ class PendingActions(private val settings: AppSettings) {
      * Send everything waiting, oldest first.
      *
      * Stops at the first failure and keeps the rest — the server is presumably
-     * still unreachable, and draining into a void would lose the lot.
+     * still unreachable, and draining into a void would lose the lot. The one
+     * exception is a server error naming the specific id gone (Subsonic code
+     * 70, "data not found") — that's not the server being unreachable, it's
+     * this one row being stale, and treating it the same way would wedge
+     * every action behind it forever.
      */
     suspend fun flush(client: MusicServer, artistId: suspend (String) -> String?): Int =
         lock.withLock {
-            val queue = decode(settings.pendingActions())
-            if (queue.isEmpty()) return@withLock 0
+            val remaining = decode(settings.pendingActions()).toMutableList()
             var sent = 0
-            for (action in queue) {
-                val ok = runCatching { apply(action, client, artistId) }.getOrDefault(false)
-                if (!ok) break
-                sent++
+            while (remaining.isNotEmpty()) {
+                val result = runCatching { apply(remaining.first(), client, artistId) }
+                when {
+                    result.getOrDefault(false) -> {
+                        remaining.removeAt(0)
+                        sent++
+                    }
+                    (result.exceptionOrNull() as? SubsonicException)?.code == 70 ->
+                        remaining.removeAt(0)
+                    else -> break
+                }
             }
-            val left = queue.drop(sent)
-            settings.setPendingActions(if (left.isEmpty()) "" else json.encodeToString(left))
-            _count.value = left.size
+            settings.setPendingActions(if (remaining.isEmpty()) "" else json.encodeToString(remaining))
+            _count.value = remaining.size
             sent
         }
 
