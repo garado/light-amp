@@ -2828,8 +2828,6 @@ class PlaybackController(
         // history would be invented by this app and restorable by nothing.
         if (LocalLibrary.isLocal(track.id)) return
         if (track.id == nowPlayingId) return
-        // Same as the timeline: "playing this now" is only true now.
-        if (!metadataAllowed()) return
         nowPlayingId = track.id
         val client = serverClient.value ?: return
         scope.launch { runCatching { client.scrobble(track.id, submission = false) } }
@@ -2864,20 +2862,9 @@ class PlaybackController(
         val at = System.currentTimeMillis()
         val client = serverClient.value
         scope.launch {
-            // Local first, so the library's ordering moves with the listening
-            // whether or not the server ever hears about this play.
             runCatching { App.library.markPlayed(track.id) }
-            // A play is durable in a way a heartbeat isn't, so where the mode
-            // forbids the bytes it is queued rather than dropped — the same
-            // road an unreachable server sends it down, and PendingActions
-            // already stamps it with when it happened. Erring towards the queue
-            // if the gate can't be read: waiting costs nothing, and a play that
-            // was never sent and never queued is gone.
-            val allowed = runCatching { metadataAllowed() }.getOrDefault(false)
-            val sent = allowed && client != null &&
+            val sent = client != null &&
                 runCatching { client.scrobble(track.id, at) }.isSuccess
-            // Guarded: a play can land before App has finished wiring itself up,
-            // and a missed scrobble is not worth a crash.
             if (!sent) {
                 runCatching {
                     App.pending.add(PendingAction(PendingAction.Kind.SCROBBLE, track.id, atMs = at))
