@@ -131,6 +131,9 @@ data class DownloadFile(
     val downloadedAtMs: Long,
 )
 
+/** A download row whose track no longer exists in the library. */
+data class OrphanedDownload(val trackId: String, val fileName: String)
+
 /** Cached track count for one album. */
 data class AlbumTrackCount(val albumId: String, val tracks: Int)
 
@@ -387,6 +390,9 @@ interface LibraryDao {
 
     @Query("DELETE FROM downloads WHERE trackId = :trackId")
     suspend fun deleteDownload(trackId: String)
+
+    @Query("SELECT trackId, fileName FROM downloads WHERE trackId NOT IN (SELECT id FROM tracks)")
+    suspend fun orphanedDownloads(): List<OrphanedDownload>
 
     @Query("DELETE FROM downloads")
     suspend fun clearDownloads()

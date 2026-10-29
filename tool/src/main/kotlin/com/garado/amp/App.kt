@@ -378,6 +378,7 @@ object App {
                     // ...and the first chance to put back the words a rebuilt
                     // download row lost, which the files themselves don't carry.
                     runCatching { downloader.refillMissingLyrics() }
+                    runCatching { downloader.removeOrphanedDownloads() }
                     topUpDownloads()
                 }
             }

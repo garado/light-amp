@@ -289,6 +289,16 @@ class Downloader(
 
     suspend fun removeAll(trackIds: List<String>) = trackIds.forEach { remove(it) }
 
+    /** Drop download rows (and their files) for tracks no longer in the library. */
+    suspend fun removeOrphanedDownloads() {
+        val source = activeSource()
+        val dao = daoFor(source)
+        dao.orphanedDownloads().forEach { orphan ->
+            store.delete(source.id, orphan.fileName)
+            dao.deleteDownload(orphan.trackId)
+        }
+    }
+
     /** Lyrics captured with a download, for offline display. */
     suspend fun cachedLyrics(trackId: String): String? =
         daoFor(activeSource()).download(trackId)?.lyrics

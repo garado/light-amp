@@ -294,9 +294,10 @@ class LibraryRepository(
         combine(allTracks, downloadFiles) { list, rows ->
             if (rows.isEmpty()) return@combine emptySet()
             val sizes = albumSizes(list)
+            val byId = trackIndex(list)
             val have = HashMap<String, Int>()
             for (row in rows) {
-                val album = row.albumId ?: continue
+                val album = byId[row.trackId]?.albumId ?: continue
                 have[album] = (have[album] ?: 0) + 1
             }
             have.entries.mapNotNullTo(mutableSetOf()) { (album, n) ->
