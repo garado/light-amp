@@ -1080,6 +1080,14 @@ class LibraryRepository(
                 val why = when {
                     prev == null -> "new album"
                     cachedCount == 0 -> "no songs cached"
+                    // A count that held steady doesn't mean nothing changed —
+                    // the same track count survives a delete-and-replace of
+                    // every file, which left stale ids cached forever despite
+                    // repeated syncs. Checked before the count comparisons,
+                    // and only when both sides have a real stamp, so it can't
+                    // misfire on rows written before this column existed.
+                    album.updatedMs != 0L && prev.updatedMs != 0L && album.updatedMs != prev.updatedMs ->
+                        "album changed on the server"
                     // A count the server didn't send is not a count of zero, and
                     // comparing against it as though it were is a test nothing
                     // can pass. Plex leaves leafCount off the album listing, so

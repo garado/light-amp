@@ -170,7 +170,7 @@ class AlbumDetailScreen(
 }
 
 /** Room above the record's facts line, tight under the header. */
-private const val CARD_TOP_PX = 8
+private const val CARD_TOP_PX = 0
 
 /** Room under the record's facts line, above the tracklist. */
-private const val CARD_GAP_PX = 24
+private const val CARD_GAP_PX = 12

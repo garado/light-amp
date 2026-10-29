@@ -246,7 +246,7 @@ const val LIST_EDGE_PX = 21
  * the 11px a 128px cover leaves inside a 150px row, and this is what makes the
  * gap above match it.
  */
-const val LIST_TOP_PX = 15
+const val LIST_TOP_PX = 8
 
 /**
  * An artist row: the same metrics as a track row, minus the cover an artist

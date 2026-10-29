@@ -39,6 +39,10 @@ import com.garado.amp.ui.pxSp
 import com.thelightphone.sdk.SealedLightActivity
 import com.thelightphone.sdk.SimpleLightScreen
 import kotlinx.coroutines.launch
+import java.util.concurrent.ConcurrentHashMap
+
+/** Whether an artist had popular songs, once asked — so revisiting doesn't re-wait. */
+private val hasPopularSeen = ConcurrentHashMap<String, Boolean>()
 
 class ArtistDetailScreen(
     sealed: SealedLightActivity,
@@ -76,9 +80,11 @@ class ArtistDetailScreen(
 
         // Only offer Popular Songs when the server actually returns some (it needs
         // Last.fm configured on the Navidrome side).
-        var hasPopular by remember(name) { mutableStateOf(false) }
+        var hasPopular by remember(name) { mutableStateOf(hasPopularSeen[name] ?: false) }
         LaunchedEffect(name) {
-            hasPopular = App.library.topSongsForArtist(name).isNotEmpty()
+            val result = App.library.topSongsForArtist(name).isNotEmpty()
+            hasPopularSeen[name] = result
+            hasPopular = result
         }
 
         val grid = App.artistAlbumGrid.collectAsState().value
