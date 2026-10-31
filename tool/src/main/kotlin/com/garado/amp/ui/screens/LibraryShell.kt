@@ -925,14 +925,8 @@ private fun PlaylistRow(
 @Composable
 private fun LibraryIndex(currentTab: LibraryTab, actions: ShellActions) {
     val source by App.source.collectAsState()
-    // The liked lists appear only where there is something in them, and not at
-    // all where the source has no likes — see MusicSource.supportsLikes.
-    val likedArtists by App.library.likedArtists.collectAsState()
-    val likedAlbums by App.library.likedAlbums.collectAsState()
-    val likedTracks by App.library.likedTracks.collectAsState()
-    val likes = source.supportsLikes
     // Which row is where you already are, so the index reads as a map rather
-    // than a plain menu — see IndexRow/LikedRow.
+    // than a plain menu — see IndexRow.
     val currentLikedOnly = likedOnly(currentTab)
 
     // A Column of its own: the shell hands each page a Box, so a header and a
@@ -955,17 +949,6 @@ private fun LibraryIndex(currentTab: LibraryTab, actions: ShellActions) {
         item { IndexRow(LibraryTab.ARTISTS, current = currentTab == LibraryTab.ARTISTS && !currentLikedOnly) }
         item { IndexRow(LibraryTab.ALBUMS, current = currentTab == LibraryTab.ALBUMS && !currentLikedOnly) }
         item { IndexRow(LibraryTab.SONGS, current = currentTab == LibraryTab.SONGS && !currentLikedOnly) }
-        // The same three again, narrowed — as a block under the whole set, so
-        // the plain lists stay together and read as one thing.
-        if (likes && likedArtists.isNotEmpty()) {
-            item { LikedRow(LibraryTab.ARTISTS, current = currentTab == LibraryTab.ARTISTS && currentLikedOnly) }
-        }
-        if (likes && likedAlbums.isNotEmpty()) {
-            item { LikedRow(LibraryTab.ALBUMS, current = currentTab == LibraryTab.ALBUMS && currentLikedOnly) }
-        }
-        if (likes && likedTracks.isNotEmpty()) {
-            item { LikedRow(LibraryTab.SONGS, current = currentTab == LibraryTab.SONGS && currentLikedOnly) }
-        }
     }
     }
 }
@@ -980,19 +963,6 @@ private fun IndexRow(tab: LibraryTab, current: Boolean) {
             // The unnarrowed list: an entry named "Albums" that showed only the
             // liked ones because the filter was left on would be lying.
             App.scope.launch { setLikedOnly(tab, false) }
-            LibraryNav.selectTab(tab)
-        },
-    )
-}
-
-/** The same tab, narrowed to what you kept. */
-@Composable
-private fun LikedRow(tab: LibraryTab, current: Boolean) {
-    TextRow(
-        title = "Liked ${tab.title}",
-        underline = current,
-        onClick = {
-            App.scope.launch { setLikedOnly(tab, true) }
             LibraryNav.selectTab(tab)
         },
     )
