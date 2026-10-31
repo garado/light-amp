@@ -53,6 +53,7 @@ class PlaylistActionsScreen(
         val readOnly = App.library.playlists.collectAsState().value
             .firstOrNull { it.id == playlistId }?.readOnly == true
         val kind = if (readOnly) "Smart playlist" else "Playlist"
+        val folder = App.playlistFolders.collectAsState().value[playlistId]
 
         ListScreen(onBack = { goBack() }, title = playlistName, subtitle = kind) {
             ActionList {
@@ -81,6 +82,7 @@ class PlaylistActionsScreen(
                         }
                     }
                 }
+                TextRow(title = "Move to Folder", subtitle = folder) { moveToFolder(folder) }
                 if (!readOnly) {
                     TextRow(title = "Rename") { rename() }
                     TextRow(title = if (confirmDelete) "Tap again to delete" else "Delete Playlist") {
@@ -104,6 +106,13 @@ class PlaylistActionsScreen(
                     App.scope.launch { App.library.renamePlaylist(playlistId, newName) }
                 }
             },
+        )
+    }
+
+    private fun moveToFolder(current: String?) {
+        navigateTo<String?>(
+            { TextEntryScreen(it, title = "Folder", initial = current.orEmpty()) },
+            resultCallback = { name -> if (name != null) App.setPlaylistFolder(playlistId, name) },
         )
     }
 }

@@ -559,7 +559,9 @@ class LibraryRepository(
         if (playlistsAreLocal()) {
             // Read straight off the disk every time: the files are the truth,
             // and another app (or an adb push) may have changed them.
-            _playlists.value = LocalPlaylists.list()
+            val local = LocalPlaylists.list()
+            _playlists.value = local
+            settings.prunePlaylistFolders(sourceId, local.map { it.id }.toSet())
             return
         }
         if (!metadataAllowed()) return
@@ -567,6 +569,7 @@ class LibraryRepository(
         if (fetched != null) {
             _playlists.value = fetched
             settings.setCachedPlaylists(sourceId, json.encodeToString(fetched))
+            settings.prunePlaylistFolders(sourceId, fetched.map { it.id }.toSet())
             return
         }
         if (_playlists.value.isEmpty()) _playlists.value = loadCachedPlaylists()

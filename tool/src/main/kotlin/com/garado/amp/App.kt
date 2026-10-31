@@ -795,6 +795,18 @@ object App {
         }.stateIn(scope, SharingStarted.Eagerly, SortedView())
     }
 
+    /** Playlist id -> folder name, for the active source only. */
+    val playlistFolders: StateFlow<Map<String, String>> by lazy {
+        combine(settings.playlistFolders, source) { all, src ->
+            val prefix = "${src.id}:"
+            all.filterKeys { it.startsWith(prefix) }.mapKeys { it.key.removePrefix(prefix) }
+        }.stateIn(scope, SharingStarted.Eagerly, emptyMap())
+    }
+
+    fun setPlaylistFolder(playlistId: String, folder: String?) {
+        scope.launch { settings.setPlaylistFolder(source.value.id, playlistId, folder) }
+    }
+
     /**
      * Change over to [active]: the client, the database, then the source.
      *

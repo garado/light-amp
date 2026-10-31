@@ -201,6 +201,7 @@ class BootScreen(sealed: SealedLightActivity) : LightScreen<Unit, BootViewModel>
                         openAlbum = { id, parent -> openAlbum(id, parent) },
                         openArtist = { name, parent -> openArtist(name, parent) },
                         openPlaylist = { id, name -> go { PlaylistDetailScreen(it, id, name) } },
+                        openPlaylistFolder = { name -> go { PlaylistFolderScreen(it, name) } },
                         trackOptions = { id, selection -> openTrackActions(id, selection) },
                         selectionActions = { tracks, selection ->
                             openSelectionActions(tracks, selection)

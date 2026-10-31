@@ -33,6 +33,7 @@ import androidx.compose.material.icons.filled.FastRewind
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.FavoriteBorder
 import androidx.compose.material.icons.filled.FilterNone
+import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.GraphicEq
 import androidx.compose.material.icons.filled.LibraryMusic
 import androidx.compose.material.icons.filled.Lyrics
@@ -89,6 +90,7 @@ object AppIcons {
     val RecordVoiceOver = Icons.Filled.Mic
     val QueueMusic = Icons.AutoMirrored.Filled.QueueMusic
     val PlaylistPlay = Icons.AutoMirrored.Filled.PlaylistPlay
+    val Folder = Icons.Filled.Folder
     /** The ••• overflow menu — horizontal dots, as every doc comment calls it. */
     val MoreHoriz = Icons.Filled.MoreHoriz
     val GraphicEq = Icons.Filled.GraphicEq

@@ -37,6 +37,7 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import com.garado.amp.data.shuffled
+import com.garado.amp.data.Playlist
 import com.garado.amp.data.TagFilter
 import com.garado.amp.ui.PlayerTheme
 import com.garado.amp.ui.components.AlphabetIndex
@@ -130,6 +131,7 @@ class ShellActions(
     val openAlbum: (String, Parent) -> Unit,
     val openArtist: (String, Parent) -> Unit,
     val openPlaylist: (String, String) -> Unit,
+    val openPlaylistFolder: (String) -> Unit,
     val trackOptions: (String, SelectionState?) -> Unit,
     /** Opens the bulk-action sheet for a multi-selection. */
     val selectionActions: (List<Track>, SelectionState) -> Unit,
@@ -834,7 +836,7 @@ private fun ArtistsTab(actions: ShellActions, header: Boolean = true) {
 private fun PlaylistsTab(actions: ShellActions, header: Boolean = true) {
     val view by App.sortedPlaylists.collectAsState()
     val playlists = view.items
-    val letters = view.letters
+    val folderOf by App.playlistFolders.collectAsState()
     val reversed by App.settings.playlistSortReversed.collectAsState(initial = false)
     val downloadedPlaylists by App.library.downloadedPlaylistIds.collectAsState()
     // getPlaylists only returns metadata, not membership — so the badge above
@@ -850,12 +852,19 @@ private fun PlaylistsTab(actions: ShellActions, header: Boolean = true) {
     // the source changes, and without a fetch tied to that change a shell that
     // stayed composed through the switch would sit on an empty list for ever.
     LaunchedEffect(source.id) { App.library.refreshPlaylists() }
+
+    val byFolder = remember(playlists, folderOf) {
+        playlists.filter { folderOf[it.id] != null }.groupBy { folderOf[it.id]!! }
+    }
+    val folderNames = remember(byFolder) { byFolder.keys.sorted() }
+    val ungrouped = remember(playlists, folderOf) { playlists.filter { folderOf[it.id] == null } }
+
     Column(Modifier.fillMaxSize()) {
         if (header) TabHeader(LibraryTab.PLAYLISTS, actions)
         IndexedList(
             anchor = "tab:playlists",
-            letters = letters,
-            headerCount = if (canCreateEmpty) 1 else 0,
+            letters = emptyList(),
+            headerCount = (if (canCreateEmpty) 1 else 0) + folderNames.size,
             reversed = reversed,
         ) {
             // A server that can't hold an empty playlist has no use for a bare
@@ -863,19 +872,29 @@ private fun PlaylistsTab(actions: ShellActions, header: Boolean = true) {
             if (canCreateEmpty) {
                 item { PlayAllRow(AppIcons.Add, "New Playlist") { actions.newPlaylist() } }
             }
-            items(playlists, key = { it.id }) { playlist ->
-                TrackRow(
-                    title = playlist.name,
-                    subtitle = "",
-                    coverArtId = playlist.coverArtId,
-                    fallback = AppIcons.QueueMusic,
-                    downloaded = playlist.id in downloadedPlaylists,
-                    onClick = { actions.openPlaylist(playlist.id, playlist.name) },
-                    onLongClick = { actions.playlistOptions(playlist.id, playlist.name) },
-                )
+            items(folderNames, key = { "folder:$it" }) { name ->
+                PlayAllRow(AppIcons.Folder, "$name (${byFolder[name]!!.size})") {
+                    actions.openPlaylistFolder(name)
+                }
+            }
+            items(ungrouped, key = { it.id }) { playlist ->
+                PlaylistRow(playlist, downloadedPlaylists, actions)
             }
         }
     }
+}
+
+@Composable
+private fun PlaylistRow(playlist: Playlist, downloadedPlaylists: Set<String>, actions: ShellActions) {
+    TrackRow(
+        title = playlist.name,
+        subtitle = "",
+        coverArtId = playlist.coverArtId,
+        fallback = AppIcons.QueueMusic,
+        downloaded = playlist.id in downloadedPlaylists,
+        onClick = { actions.openPlaylist(playlist.id, playlist.name) },
+        onLongClick = { actions.playlistOptions(playlist.id, playlist.name) },
+    )
 }
 
 
