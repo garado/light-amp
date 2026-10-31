@@ -836,6 +836,7 @@ private fun PlaylistsTab(actions: ShellActions, header: Boolean = true) {
     val view by App.sortedPlaylists.collectAsState()
     val playlists = view.items
     val folderOf by App.playlistFolders.collectAsState()
+    val starred by App.starredPlaylists.collectAsState()
     val reversed by App.settings.playlistSortReversed.collectAsState(initial = false)
     val downloadedPlaylists by App.library.downloadedPlaylistIds.collectAsState()
     // getPlaylists only returns metadata, not membership — so the badge above
@@ -849,24 +850,39 @@ private fun PlaylistsTab(actions: ShellActions, header: Boolean = true) {
     // stayed composed through the switch would sit on an empty list for ever.
     LaunchedEffect(source.id) { App.library.refreshPlaylists() }
 
+    val starredList = remember(playlists, starred) { playlists.filter { it.id in starred } }
     val byFolder = remember(playlists, folderOf) {
         playlists.filter { folderOf[it.id] != null }.groupBy { folderOf[it.id]!! }
     }
     val folderNames = remember(byFolder) { byFolder.keys.sorted() }
-    val ungrouped = remember(playlists, folderOf) { playlists.filter { folderOf[it.id] == null } }
+    // Starred-and-ungrouped playlists show once, pinned at the top — not again
+    // down here. A folder's starred member still shows twice, but that's across
+    // two different screens (the pin, and the folder itself) rather than one
+    // list repeating a row it just showed.
+    val ungrouped = remember(playlists, folderOf, starred) {
+        playlists.filter { folderOf[it.id] == null && it.id !in starred }
+    }
 
     Column(Modifier.fillMaxSize()) {
         if (header) TabHeader(LibraryTab.PLAYLISTS, actions)
         IndexedList(
             anchor = "tab:playlists",
             letters = emptyList(),
-            headerCount = folderNames.size,
+            headerCount = starredList.size + folderNames.size,
             reversed = reversed,
         ) {
+            items(starredList, key = { "star:${it.id}" }) { playlist ->
+                PlaylistRow(playlist, downloadedPlaylists, actions, starred = true)
+            }
             items(folderNames, key = { "folder:$it" }) { name ->
-                PlayAllRow(AppIcons.Folder, "$name (${byFolder[name]!!.size})") {
-                    actions.openPlaylistFolder(name)
-                }
+                val count = byFolder[name]!!.size
+                TrackRow(
+                    title = name,
+                    subtitle = if (count == 1) "1 playlist" else "$count playlists",
+                    coverArtId = null,
+                    showIcon = false,
+                    onClick = { actions.openPlaylistFolder(name) },
+                )
             }
             items(ungrouped, key = { it.id }) { playlist ->
                 PlaylistRow(playlist, downloadedPlaylists, actions)
@@ -876,9 +892,14 @@ private fun PlaylistsTab(actions: ShellActions, header: Boolean = true) {
 }
 
 @Composable
-private fun PlaylistRow(playlist: Playlist, downloadedPlaylists: Set<String>, actions: ShellActions) {
+private fun PlaylistRow(
+    playlist: Playlist,
+    downloadedPlaylists: Set<String>,
+    actions: ShellActions,
+    starred: Boolean = false,
+) {
     TrackRow(
-        title = playlist.name,
+        title = if (starred) "★  ${playlist.name}" else playlist.name,
         subtitle = "",
         coverArtId = playlist.coverArtId,
         fallback = AppIcons.QueueMusic,

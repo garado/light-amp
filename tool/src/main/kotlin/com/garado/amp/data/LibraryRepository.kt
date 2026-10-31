@@ -561,7 +561,9 @@ class LibraryRepository(
             // and another app (or an adb push) may have changed them.
             val local = LocalPlaylists.list()
             _playlists.value = local
-            settings.prunePlaylistFolders(sourceId, local.map { it.id }.toSet())
+            val liveIds = local.map { it.id }.toSet()
+            settings.prunePlaylistFolders(sourceId, liveIds)
+            settings.pruneStarredPlaylists(sourceId, liveIds)
             return
         }
         if (!metadataAllowed()) return
@@ -569,7 +571,9 @@ class LibraryRepository(
         if (fetched != null) {
             _playlists.value = fetched
             settings.setCachedPlaylists(sourceId, json.encodeToString(fetched))
-            settings.prunePlaylistFolders(sourceId, fetched.map { it.id }.toSet())
+            val liveIds = fetched.map { it.id }.toSet()
+            settings.prunePlaylistFolders(sourceId, liveIds)
+            settings.pruneStarredPlaylists(sourceId, liveIds)
             return
         }
         if (_playlists.value.isEmpty()) _playlists.value = loadCachedPlaylists()

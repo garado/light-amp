@@ -32,6 +32,7 @@ class PlaylistFolderScreen(
     override fun Content() {
         val view by App.sortedPlaylists.collectAsState()
         val folderOf by App.playlistFolders.collectAsState()
+        val starred by App.starredPlaylists.collectAsState()
         val playlists = view.items.filter { folderOf[it.id] == folderName }
         val downloadedPlaylists by App.library.downloadedPlaylistIds.collectAsState()
 
@@ -45,7 +46,7 @@ class PlaylistFolderScreen(
                 LibraryList(anchor = "folder:$folderName", headerCount = 0) {
                     items(playlists, key = { it.id }) { playlist ->
                         TrackRow(
-                            title = playlist.name,
+                            title = if (playlist.id in starred) "★  ${playlist.name}" else playlist.name,
                             subtitle = "",
                             coverArtId = playlist.coverArtId,
                             fallback = AppIcons.QueueMusic,

@@ -807,6 +807,18 @@ object App {
         scope.launch { settings.setPlaylistFolder(source.value.id, playlistId, folder) }
     }
 
+    /** Starred playlist ids, for the active source only. */
+    val starredPlaylists: StateFlow<Set<String>> by lazy {
+        combine(settings.starredPlaylists, source) { all, src ->
+            val prefix = "${src.id}:"
+            all.filter { it.startsWith(prefix) }.map { it.removePrefix(prefix) }.toSet()
+        }.stateIn(scope, SharingStarted.Eagerly, emptySet())
+    }
+
+    fun setPlaylistStarred(playlistId: String, starred: Boolean) {
+        scope.launch { settings.setPlaylistStarred(source.value.id, playlistId, starred) }
+    }
+
     /**
      * Change over to [active]: the client, the database, then the source.
      *

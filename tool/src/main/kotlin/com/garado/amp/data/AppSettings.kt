@@ -641,6 +641,32 @@ class AppSettings(private val dataStore: DataStore<Preferences>) {
         raw?.let { runCatching { sourcesJson.decodeFromString<Map<String, String>>(it) }.getOrNull() }
             ?: emptyMap()
 
+    /** Local-only: starred playlist ids. Keyed by "<sourceId>:<playlistId>". */
+    val starredPlaylists: Flow<Set<String>> = dataStore.data.map { p ->
+        decodeStarredPlaylists(p[STARRED_PLAYLISTS])
+    }.distinctUntilChanged()
+
+    suspend fun setPlaylistStarred(sourceId: String, playlistId: String, starred: Boolean) {
+        val key = "$sourceId:$playlistId"
+        dataStore.edit { p ->
+            val current = decodeStarredPlaylists(p[STARRED_PLAYLISTS])
+            val updated = if (starred) current + key else current - key
+            p[STARRED_PLAYLISTS] = sourcesJson.encodeToString(updated)
+        }
+    }
+
+    suspend fun pruneStarredPlaylists(sourceId: String, liveIds: Set<String>) {
+        dataStore.edit { p ->
+            val current = decodeStarredPlaylists(p[STARRED_PLAYLISTS])
+            val prefix = "$sourceId:"
+            val pruned = current.filterTo(mutableSetOf()) { k -> !k.startsWith(prefix) || k.removePrefix(prefix) in liveIds }
+            if (pruned.size != current.size) p[STARRED_PLAYLISTS] = sourcesJson.encodeToString(pruned)
+        }
+    }
+
+    private fun decodeStarredPlaylists(raw: String?): Set<String> =
+        raw?.let { runCatching { sourcesJson.decodeFromString<Set<String>>(it) }.getOrNull() } ?: emptySet()
+
     suspend fun setInvertColors(value: Boolean) = putBool(INVERT_COLORS, value)
     suspend fun setKaraokeLyrics(value: Boolean) = putBool(KARAOKE_LYRICS, value)
     suspend fun setAlbumGrid(value: Boolean) = putBool(ALBUM_GRID, value)
@@ -706,6 +732,7 @@ class AppSettings(private val dataStore: DataStore<Preferences>) {
         private val ARTIST_SORT_REV = booleanPreferencesKey("pref.artistSortReversed")
         private val PLAYLIST_SORT_REV = booleanPreferencesKey("pref.playlistSortReversed")
         private val PLAYLIST_FOLDERS = stringPreferencesKey("pref.playlistFolders")
+        private val STARRED_PLAYLISTS = stringPreferencesKey("pref.starredPlaylists")
         private val SHUFFLE_NONCE = intPreferencesKey("pref.shuffleNonce")
 
         private val INVERT_COLORS = booleanPreferencesKey("pref.invertColors")

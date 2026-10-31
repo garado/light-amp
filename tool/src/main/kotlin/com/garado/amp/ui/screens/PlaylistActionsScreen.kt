@@ -12,8 +12,11 @@ import com.garado.amp.App
 import com.garado.amp.data.Track
 import com.garado.amp.data.shuffled
 import com.garado.amp.ui.components.ActionList
+import com.garado.amp.ui.components.AppIcon
+import com.garado.amp.ui.components.AppIcons
 import com.garado.amp.ui.components.ListScreen
 import com.garado.amp.ui.components.TextRow
+import com.garado.amp.ui.px
 import com.thelightphone.sdk.SealedLightActivity
 import com.thelightphone.sdk.SimpleLightScreen
 import kotlinx.coroutines.launch
@@ -54,9 +57,14 @@ class PlaylistActionsScreen(
             .firstOrNull { it.id == playlistId }?.readOnly == true
         val kind = if (readOnly) "Smart playlist" else "Playlist"
         val folder = App.playlistFolders.collectAsState().value[playlistId]
+        val starred = playlistId in App.starredPlaylists.collectAsState().value
 
         ListScreen(onBack = { goBack() }, title = playlistName, subtitle = kind) {
             ActionList {
+                TextRow(
+                    title = if (starred) "Unstar Playlist" else "Star Playlist",
+                    trailing = { if (starred) AppIcon(AppIcons.Star, size = px(61)) },
+                ) { App.setPlaylistStarred(playlistId, !starred) }
                 TextRow(title = "Play") {
                     if (list.isNotEmpty()) {
                         App.playback.playQueue(list, 0)

@@ -103,6 +103,8 @@ fun TrackRow(
      * left edge whether or not selection is active.
      */
     selected: Boolean? = null,
+    /** No artwork slot at all — a folder row, which has nothing to show there. */
+    showIcon: Boolean = true,
 ) {
     val artworkHidden = App.hideArtwork.collectAsState().value
     // Read here rather than inside the branch below: behind an `if` this stops
@@ -112,7 +114,9 @@ fun TrackRow(
     Row(
         modifier = modifier
             .fillMaxWidth()
-            .height(px(ROW_H_PX))
+            // One line closes the row up to the artist rows' tighter pitch
+            // rather than leaving the second line's height empty beneath it.
+            .height(px(if (subtitle.isBlank()) ROW_SINGLE_H_PX else ROW_H_PX))
             .rowClickable(onClick = onClick, onLongClick = onLongClick),
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -141,7 +145,7 @@ fun TrackRow(
                 )
             }
             Spacer(Modifier.width(px(ROW_GAP_PX)))
-        } else if (!artworkHidden) {
+        } else if (showIcon && !artworkHidden) {
             AppArtwork(coverArtId = coverArtId, size = px(ROW_ART_PX), fallback = fallback)
             // Only when there is artwork to sit beside: with none, the title
             // belongs against the mark, not floating a cover's gap away from it.
