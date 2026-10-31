@@ -41,34 +41,18 @@ import com.thelightphone.sdk.SimpleLightScreen
 import kotlinx.coroutines.launch
 import java.util.concurrent.ConcurrentHashMap
 
-/** Whether an artist had popular songs, once asked — so revisiting doesn't re-wait. */
-private val hasPopularSeen = ConcurrentHashMap<String, Boolean>()
-
 class ArtistDetailScreen(
     sealed: SealedLightActivity,
     private val name: String,
 ) : SimpleLightScreen<Unit>(sealed) {
 
-    /**
-     * The two ways into this artist's songs.
-     *
-     * All Songs holds its place whether or not the server has popular tracks to
-     * offer — the list is fetched, and a button that slides sideways when the
-     * answer arrives is worse than one that started where it belongs.
-     */
     @Composable
-    private fun SongShortcuts(hasPopular: Boolean) {
+    private fun SongShortcuts() {
         SplitActionRow(
             leftIcon = AppIcons.FormatListBulleted,
             leftLabel = "All Songs",
             onLeft = { go { ArtistSongsScreen(it, name) } },
-            rightIcon = if (hasPopular) AppIcons.Whatshot else null,
-            rightLabel = "Popular",
-            onRight = if (hasPopular) {
-                { go { ArtistTopSongsScreen(it, name) } }
-            } else {
-                null
-            },
+            center = true,
         )
     }
     @Composable
@@ -77,15 +61,6 @@ class ArtistDetailScreen(
         val albums by App.library.albums.collectAsState()
         val artistAlbums = remember(tracks, albums, name) { App.library.albumsForArtist(name) }
         val downloadedAlbums by App.library.downloadedAlbumIds.collectAsState()
-
-        // Only offer Popular Songs when the server actually returns some (it needs
-        // Last.fm configured on the Navidrome side).
-        var hasPopular by remember(name) { mutableStateOf(hasPopularSeen[name] ?: false) }
-        LaunchedEffect(name) {
-            val result = App.library.topSongsForArtist(name).isNotEmpty()
-            hasPopularSeen[name] = result
-            hasPopular = result
-        }
 
         val grid = App.artistAlbumGrid.collectAsState().value
 
@@ -110,7 +85,7 @@ class ArtistDetailScreen(
                     // Spans the row, so the two song shortcuts read as a header
                     // over the records rather than as the first one.
                     item(span = { GridItemSpan(maxLineSpan) }) {
-                        SongShortcuts(hasPopular)
+                        SongShortcuts()
                     }
                 }
                 return@LibrarySubPage
@@ -123,9 +98,9 @@ class ArtistDetailScreen(
                 // Liking lives on the artist list's long-press, not here: this
                 // page is the discography, and a heart at the top of it was the
                 // one row that wasn't a way into the music.
-                item { SongShortcuts(hasPopular) }
+                item { SongShortcuts() }
                 // No Shuffle here: this page is a discography, and shuffling a
-                // whole artist belongs on the song lists (All / Popular) instead.
+                // whole artist belongs on the song list instead.
                 items(artistAlbums, key = { it.id }) { album ->
                     TrackRow(
                         title = album.title,
@@ -195,85 +170,6 @@ class ArtistActionsScreen(
     }
 }
 
-
-/**
- * An artist's top tracks in popularity order. Deliberately just the top songs —
- * shuffling here shouldn't drop the whole discography into the queue.
- */
-class ArtistTopSongsScreen(
-    sealed: SealedLightActivity,
-    private val name: String,
-) : SimpleLightScreen<Unit>(sealed) {
-    @Composable
-    override fun Content() {
-        var songs by remember(name) { mutableStateOf<List<Track>?>(null) }
-        LaunchedEffect(name) { songs = App.library.topSongsForArtist(name) }
-        val downloadedIds by App.library.downloadedTrackIds.collectAsState()
-
-        val selection = rememberSelection("artist-top:$name")
-
-        LibrarySubPage(LibraryPage.ARTIST_POPULAR) {
-            if (selection.active) {
-                SelectionHeader(selection) {
-                    openSelectionActions(selection.pick(songs.orEmpty()) { it.id }, selection)
-                }
-            } else {
-                AppHeader(
-                    onBack = { goBack() },
-                    titleContent = {
-                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                            AppText("Popular Songs", pxSp(LightType.FINE_PX), lineHeight = pxSp(LightType.FINE_LINE_PX), maxLines = 1)
-                            AppText(name, pxSp(LightType.DETAIL_PX), lineHeight = pxSp(LightType.DETAIL_LINE_PX), dim = true, maxLines = 1)
-                        }
-                    },
-                    rightAction = libraryCornerAction(LibraryPage.ARTIST_POPULAR),
-                )
-            }
-            val list = songs
-            when {
-                list == null -> EmptyState("Loading…")
-                list.isEmpty() -> EmptyState("No popular songs")
-                else -> LibraryList(
-                    anchor = "artist-top:$name",
-                    headerCount = if (selection.active) 0 else 1,
-                    // No bar on this one before, and adding one is not this
-                    // change's business.
-                    scrollBar = false,
-                    modifier = Modifier.fillMaxSize(),
-                ) {
-                    if (!selection.active) {
-                        item {
-                            PlayAllRow(LightIcons.SHUFFLE, "Shuffle") {
-                                App.playback.playQueue(shuffled(list), 0)
-                                go { NowPlayingScreen(it) }
-                            }
-                        }
-                    }
-                    itemsIndexed(list, key = { _, t -> t.id }) { index, track ->
-                        TrackRow(
-                            title = track.title,
-                            subtitle = track.album,
-                            coverArtId = track.coverArtId,
-                            downloaded = track.id in downloadedIds,
-                            selected = if (selection.active) track.id in selection.selected else null,
-                            onClick = {
-                                if (selection.active) {
-                                    selection.toggle(track.id)
-                                } else {
-                                    App.playback.playQueue(list, index)
-                                    go { NowPlayingScreen(it) }
-                                }
-                            },
-                            onLongClick = {
-                                if (!selection.active) openTrackActions(track.id, selection)
-                            },
-                        )
-                    }
-                }
-            }
-        }
-    }
-}
 
 class ArtistSongsScreen(
     sealed: SealedLightActivity,

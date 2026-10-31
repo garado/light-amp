@@ -229,7 +229,6 @@ enum class LibraryPage {
     ALBUM,
     ARTIST,
     ARTIST_SONGS,
-    ARTIST_POPULAR,
     PLAYLIST,
 
     /** Peers of the tabs, reached from More, that carry a tab's sort. */

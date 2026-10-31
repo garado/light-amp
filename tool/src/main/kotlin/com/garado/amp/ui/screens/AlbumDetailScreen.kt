@@ -144,7 +144,6 @@ class AlbumDetailScreen(
             albumFacts(album, tracks),
             pxSp(ROW_SUB_PX),
             lineHeight = pxSp(ROW_SUB_LINE_PX),
-            dim = true,
             align = TextAlign.Center,
             maxLines = 1,
             modifier = Modifier.fillMaxWidth().padding(top = px(CARD_TOP_PX), bottom = px(CARD_GAP_PX)),

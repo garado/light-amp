@@ -206,7 +206,6 @@ private fun defaultTitle(page: LibraryPage): String = when (page) {
     LibraryPage.SEARCH -> "Search"
     LibraryPage.LIBRARY -> "Library"
     LibraryPage.DOWNLOADS -> "Downloads"
-    LibraryPage.ARTIST_POPULAR -> "Popular Songs"
     // Named after a record, a person, a playlist or a tag, so the page hands
     // its own title over — see MoreScreen.pageTitle.
     LibraryPage.ALBUM -> "Album"
@@ -303,7 +302,6 @@ private fun sortOf(page: LibraryPage): PageSetting = when (page) {
     LibraryPage.ALBUM -> PageSetting("Track order")
     LibraryPage.ARTIST -> PageSetting("Date Released")
     LibraryPage.ARTIST_SONGS -> PageSetting("Album")
-    LibraryPage.ARTIST_POPULAR -> PageSetting("Frequently Played")
     LibraryPage.PLAYLIST -> PageSetting("Playlist order")
     LibraryPage.SEARCH -> PageSetting("Library order")
     // A menu of places, in the order the app lists them.

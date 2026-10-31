@@ -392,12 +392,15 @@ fun SplitActionRow(
     rightLabel: String = "",
     onRight: (() -> Unit)? = null,
     modifier: Modifier = Modifier,
+    /** A lone button centres instead of keeping the left slot — see below. */
+    center: Boolean = false,
 ) {
     Box(
         modifier = modifier.fillMaxWidth().heightIn(min = px(ROW_ACTION_H_PX)),
     ) {
         val left = if (leftIcon != null && onLeft != null) leftIcon to onLeft else null
         val right = if (rightIcon != null && onRight != null) rightIcon to onRight else null
+        val soloX = if (center) CANVAS_W_PX / 2 else SPLIT_LEFT_X_PX
         when {
             left != null && right != null -> {
                 ActionSlot(SPLIT_LEFT_X_PX, left.first, leftLabel, left.second)
@@ -405,11 +408,12 @@ fun SplitActionRow(
             }
             // A lone button keeps the left slot rather than moving to the
             // middle: every one of these rows then starts on the same axis,
-            // whether or not it has a second half.
+            // whether or not it has a second half. Unless the caller never
+            // has a second half, in which case it's just centred.
             left != null ->
-                ActionSlot(SPLIT_LEFT_X_PX, left.first, leftLabel, left.second, SOLO_SLOT_PX)
+                ActionSlot(soloX, left.first, leftLabel, left.second, SOLO_SLOT_PX)
             right != null ->
-                ActionSlot(SPLIT_LEFT_X_PX, right.first, rightLabel, right.second, SOLO_SLOT_PX)
+                ActionSlot(soloX, right.first, rightLabel, right.second, SOLO_SLOT_PX)
         }
     }
 }
@@ -547,6 +551,7 @@ fun NumberedRow(
                     subtitle,
                     pxSp(NUMBERED_SUB_PX),
                     lineHeight = pxSp(NUMBERED_SUB_LINE_PX),
+                    dim = true,
                     maxLines = 1,
                 )
             }
