@@ -117,7 +117,7 @@ class AlbumDetailScreen(
                                     if (selection.active) {
                                         selection.toggle(track.id)
                                     } else {
-                                        App.playback.playQueue(list, index)
+                                        if (current?.id != track.id) App.playback.playQueue(list, index)
                                         go { NowPlayingScreen(it) }
                                     }
                                 },

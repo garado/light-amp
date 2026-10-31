@@ -169,7 +169,9 @@ class PlaylistDetailScreen(
                                 if (editing) {
                                     selection.toggle(track.id)
                                 } else {
-                                    App.playback.playQueue(list, index)
+                                    if (App.playback.currentTrack.value?.id != track.id) {
+                                        App.playback.playQueue(list, index)
+                                    }
                                     go { NowPlayingScreen(it) }
                                 }
                             },

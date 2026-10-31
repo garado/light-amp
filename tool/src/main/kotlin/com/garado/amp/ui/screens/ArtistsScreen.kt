@@ -222,7 +222,9 @@ class ArtistSongsScreen(
                             if (selection.active) {
                                 selection.toggle(track.id)
                             } else {
-                                App.playback.playQueue(songs, index)
+                                if (App.playback.currentTrack.value?.id != track.id) {
+                                    App.playback.playQueue(songs, index)
+                                }
                                 go { NowPlayingScreen(it) }
                             }
                         },

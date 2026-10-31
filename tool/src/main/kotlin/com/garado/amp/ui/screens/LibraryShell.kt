@@ -335,7 +335,9 @@ private fun SearchView(
                             // and back out of the player means back to the
                             // results you picked from, still typed, still
                             // scrolled where you left them.
-                            App.playback.playQueue(listOf(track), 0)
+                            if (App.playback.currentTrack.value?.id != track.id) {
+                                App.playback.playQueue(listOf(track), 0)
+                            }
                             actions.nowPlaying()
                         },
                         onLongClick = { actions.trackOptions(track.id, null) },
@@ -773,8 +775,10 @@ private fun SongsTab(actions: ShellActions, header: Boolean = true) {
                         if (selection.active) {
                             selection.toggle(track.id)
                         } else {
-                            val index = sorted.indexOfFirst { it.id == track.id }
-                            App.playback.playQueue(sorted, index.coerceAtLeast(0))
+                            if (App.playback.currentTrack.value?.id != track.id) {
+                                val index = sorted.indexOfFirst { it.id == track.id }
+                                App.playback.playQueue(sorted, index.coerceAtLeast(0))
+                            }
                             actions.nowPlaying()
                         }
                     },
