@@ -149,6 +149,11 @@ class MoreScreen(
                 if (sort.open != null) item { Setting("Sort by", sort) }
                 if (genre != null) item { Setting("Genre", genre) }
                 if (composer != null) item { Setting("Composer", composer) }
+                // A server that can only create a playlist with songs in it has no
+                // use for a bare "New Playlist" — see MusicSource.supportsEmptyPlaylists.
+                if (page == LibraryPage.PLAYLISTS && active?.supportsEmptyPlaylists == true) {
+                    item { TextRow(title = "New Playlist", onClick = { createPlaylistFlow() }) }
+                }
             }
         }
 
@@ -179,6 +184,15 @@ class MoreScreen(
      */
     private fun change(factory: (SealedLightActivity) -> SimpleLightScreen<Unit>) {
         navigateTo(factory, resultCallback = { goBack() })
+    }
+
+    private fun createPlaylistFlow() {
+        navigateTo<String?>(
+            { TextEntryScreen(it, title = "New Playlist") },
+            resultCallback = { name ->
+                if (!name.isNullOrBlank()) App.scope.launch { App.library.createPlaylist(name) }
+            },
+        )
     }
 }
 

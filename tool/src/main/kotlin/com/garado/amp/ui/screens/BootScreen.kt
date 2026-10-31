@@ -89,15 +89,6 @@ class BootScreen(sealed: SealedLightActivity) : LightScreen<Unit, BootViewModel>
         App.shutdown()
     }
 
-    private fun createPlaylistFlow() {
-        navigateTo<String?>(
-            { TextEntryScreen(it, title = "New Playlist") },
-            resultCallback = { name ->
-                if (!name.isNullOrBlank()) App.scope.launch { App.library.createPlaylist(name) }
-            },
-        )
-    }
-
     @Composable
     override fun Content() {
         val state by viewModel.bootState.collectAsState()
@@ -209,7 +200,6 @@ class BootScreen(sealed: SealedLightActivity) : LightScreen<Unit, BootViewModel>
                         albumOptions = { id -> go { AlbumActionsScreen(it, id) } },
                         artistOptions = { name -> go { ArtistActionsScreen(it, name) } },
                         playlistOptions = { id, name -> go { PlaylistActionsScreen(it, id, name) } },
-                        newPlaylist = { createPlaylistFlow() },
                     ),
                 )
             }

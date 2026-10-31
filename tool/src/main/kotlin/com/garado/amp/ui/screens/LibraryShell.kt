@@ -139,7 +139,6 @@ class ShellActions(
     /** Long-press on an artist: the only way to like one. */
     val artistOptions: (String) -> Unit,
     val playlistOptions: (String, String) -> Unit,
-    val newPlaylist: () -> Unit,
 )
 
 @Composable
@@ -844,10 +843,7 @@ private fun PlaylistsTab(actions: ShellActions, header: Boolean = true) {
     LaunchedEffect(playlists) {
         App.library.primePlaylistTrackIds(playlists.map { it.id })
     }
-    // A server that can only create a playlist with songs in it has no use for a
-    // bare "New Playlist" — see MusicSource.supportsEmptyPlaylists.
     val source = App.source.collectAsState().value
-    val canCreateEmpty = source.supportsEmptyPlaylists
     // Keyed on the source, not on first composition: playlists are dropped when
     // the source changes, and without a fetch tied to that change a shell that
     // stayed composed through the switch would sit on an empty list for ever.
@@ -864,14 +860,9 @@ private fun PlaylistsTab(actions: ShellActions, header: Boolean = true) {
         IndexedList(
             anchor = "tab:playlists",
             letters = emptyList(),
-            headerCount = (if (canCreateEmpty) 1 else 0) + folderNames.size,
+            headerCount = folderNames.size,
             reversed = reversed,
         ) {
-            // A server that can't hold an empty playlist has no use for a bare
-            // "New Playlist" — see MusicSource.supportsEmptyPlaylists.
-            if (canCreateEmpty) {
-                item { PlayAllRow(AppIcons.Add, "New Playlist") { actions.newPlaylist() } }
-            }
             items(folderNames, key = { "folder:$it" }) { name ->
                 PlayAllRow(AppIcons.Folder, "$name (${byFolder[name]!!.size})") {
                     actions.openPlaylistFolder(name)
