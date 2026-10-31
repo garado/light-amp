@@ -77,6 +77,18 @@ class PlaylistActionsScreen(
                         replaceWithPlayer()
                     }
                 }
+                TextRow(title = "Move to Folder", subtitle = folder) { moveToFolder(folder) }
+                if (!readOnly) {
+                    TextRow(title = "Rename") { rename() }
+                    TextRow(title = if (confirmDelete) "Tap again to delete" else "Delete Playlist") {
+                        if (confirmDelete) {
+                            App.scope.launch { App.library.deletePlaylist(playlistId) }
+                            if (fromDetail) popToRoot() else goBack()
+                        } else {
+                            confirmDelete = true
+                        }
+                    }
+                }
                 if (list.isNotEmpty() && source.supportsDownloads) {
                     if (fullyDownloaded) {
                         TextRow(title = "Remove from Downloads") {
@@ -87,18 +99,6 @@ class PlaylistActionsScreen(
                         TextRow(title = "Download Playlist") {
                             App.downloader.enqueue(list)
                             goBack()
-                        }
-                    }
-                }
-                TextRow(title = "Move to Folder", subtitle = folder) { moveToFolder(folder) }
-                if (!readOnly) {
-                    TextRow(title = "Rename") { rename() }
-                    TextRow(title = if (confirmDelete) "Tap again to delete" else "Delete Playlist") {
-                        if (confirmDelete) {
-                            App.scope.launch { App.library.deletePlaylist(playlistId) }
-                            if (fromDetail) popToRoot() else goBack()
-                        } else {
-                            confirmDelete = true
                         }
                     }
                 }

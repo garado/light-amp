@@ -72,6 +72,11 @@ class AlbumActionsScreen(
                         go { RatingScreen(it, album.id, album.title, album.rating, isAlbum = true) }
                     }
                 }
+                if (album != null && album.artist.isNotBlank()) {
+                    TextRow(title = "Go to Artist") {
+                        openArtist(album.artist, Parent.tab(LibraryTab.ARTISTS))
+                    }
+                }
                 if (list.isNotEmpty() && source.supportsDownloads) {
                     if (fullyDownloaded) {
                         TextRow(title = "Remove from Downloads") {
@@ -83,11 +88,6 @@ class AlbumActionsScreen(
                             App.downloader.enqueue(list)
                             goBack()
                         }
-                    }
-                }
-                if (album != null && album.artist.isNotBlank()) {
-                    TextRow(title = "Go to Artist") {
-                        openArtist(album.artist, Parent.tab(LibraryTab.ARTISTS))
                     }
                 }
             }

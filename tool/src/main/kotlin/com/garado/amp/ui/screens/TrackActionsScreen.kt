@@ -179,19 +179,6 @@ class TrackActionsScreen(
                         )
                     }
                 }
-                if (showDownload && source.supportsDownloads) {
-                    if (downloaded) {
-                        TextRow(title = "Remove from Downloads") {
-                            App.scope.launch { App.downloader.remove(track.id) }
-                            goBack()
-                        }
-                    } else {
-                        TextRow(title = "Add to Downloads") {
-                            App.downloader.enqueue(listOf(track))
-                            goBack()
-                        }
-                    }
-                }
                 // The full cover belongs to the track you're listening to: it's
                 // something to look at *while* it plays, and only the player can
                 // put it where that makes sense.
@@ -235,6 +222,19 @@ class TrackActionsScreen(
                 }
                 TextRow(title = "Go to Artist") {
                     openArtist(artist, Parent.tab(LibraryTab.ARTISTS))
+                }
+                if (showDownload && source.supportsDownloads) {
+                    if (downloaded) {
+                        TextRow(title = "Remove from Downloads") {
+                            App.scope.launch { App.downloader.remove(track.id) }
+                            goBack()
+                        }
+                    } else {
+                        TextRow(title = "Add to Downloads") {
+                            App.downloader.enqueue(listOf(track))
+                            goBack()
+                        }
+                    }
                 }
             }
         }
