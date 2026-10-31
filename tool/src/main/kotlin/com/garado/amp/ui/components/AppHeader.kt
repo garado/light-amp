@@ -46,7 +46,7 @@ data class HeaderAction(
  *
  * Search and now-playing read as a pair, so they sit a half-pitch apart: the
  * now-playing icon keeps the shared [EDGE_INSET_PX] axis (80px in from the right,
- * so centred at 1000px) with the full 160px square around it, and search centres
+ * so centred at 1000px) with the full 120px square around it, and search centres
  * 120px to its left, at 880px, inside an 80px square.
  *
  * The two hit boxes meet at 920px without overlapping: search covers 840–920 and
@@ -54,7 +54,7 @@ data class HeaderAction(
  */
 private const val EDGE_INSET_PX = 80
 private const val SEARCH_SLOT_PX = 80
-private const val NOW_PLAYING_SLOT_PX = 160
+private const val NOW_PLAYING_SLOT_PX = 120
 
 /** Gap between the two icon centres. */
 private const val SEARCH_TO_NOW_PLAYING_PX = 120
@@ -112,15 +112,15 @@ private const val SUBPAGE_TITLE_PX = 45
 private const val SUBPAGE_TITLE_LINE_PX = 54
 
 /**
- * Header height in LP3 pixels — 160px, the same 4 grid units as the bottom bars.
+ * Header height in LP3 pixels — 120px, the same 4 grid units as the bottom bars.
  *
  * Fixed rather than derived from `screenHeight − screenWidth`: that formula gives
- * 160px on the LP3 but a smaller value wherever the reported height excludes
- * insets (the emulator), which made the edge buttons stop being 160×160 squares.
+ * 120px on the LP3 but a smaller value wherever the reported height excludes
+ * insets (the emulator), which made the edge buttons stop being 120×120 squares.
  * On the LP3 this is the same number, and it also leaves the content area exactly
  * 1080 × 1080 — a full-width square for artwork.
  */
-const val HEADER_BAR_PX = 160
+const val HEADER_BAR_PX = 120
 
 /**
  * The header every page wears: a [HEADER_BAR_PX] band with a full-height square
@@ -153,17 +153,17 @@ fun AppHeader(
      */
     fitTitle: Boolean = false,
 ) {
-    // Left and right slots are 160px squares, so their hit boxes match the
+    // Left and right slots are 120px squares, so their hit boxes match the
     // transport's and the icons land on the shared 80px axis. The right slot
     // narrows when search is present (see the constants above).
     val headerHeight = px(HEADER_BAR_PX)
     val hasSearch = searchAction != null
-    // Now-playing keeps a full 160px square centred on its own icon, so no shift.
+    // Now-playing keeps a full 120px square centred on its own icon, so no shift.
     val rightSlot = if (hasSearch) px(NOW_PLAYING_SLOT_PX) else headerHeight
     // Search centres SEARCH_TO_NOW_PLAYING_PX to its left; the right slot already
     // reaches half its width past that centre, so this is the leftover gap.
     val searchGap = px(SEARCH_TO_NOW_PLAYING_PX - NOW_PLAYING_SLOT_PX / 2 - SEARCH_SLOT_PX / 2)
-    // Each side's extra width beyond its 160px corner square. Whichever side has
+    // Each side's extra width beyond its 120px corner square. Whichever side has
     // less gets the difference as a spacer, so the title stays centred on screen
     // whether one, both or neither of the inner slots is present.
     val extraSlot = px(SEARCH_SLOT_PX) + searchGap
