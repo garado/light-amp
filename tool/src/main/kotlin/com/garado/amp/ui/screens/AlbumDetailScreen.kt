@@ -5,7 +5,6 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -24,6 +23,7 @@ import com.garado.amp.ui.components.AppIcons
 import com.garado.amp.ui.components.LibraryList
 import com.garado.amp.ui.components.AppText
 import com.garado.amp.ui.components.NumberedRow
+import com.garado.amp.ui.components.SectionLabel
 import com.garado.amp.ui.components.SelectionHeader
 import com.garado.amp.ui.components.rememberSelection
 import com.thelightphone.sdk.SealedLightActivity
@@ -96,6 +96,7 @@ class AlbumDetailScreen(
                 }
 
                 val list = tracks
+                val multiDisc = list != null && list.mapNotNull { it.discNumber }.distinct().size > 1
                 when {
                     list == null -> Loading()
                     else -> LibraryList(
@@ -103,28 +104,34 @@ class AlbumDetailScreen(
                         headerCount = 0,
                         modifier = Modifier.fillMaxSize(),
                     ) {
-                        itemsIndexed(list, key = { _, t -> t.id }) { index, track ->
-                            NumberedRow(
-                                number = track.trackNumber ?: (index + 1),
-                                title = track.title,
-                                // Only where this track's own credit differs
-                                // from the album's — otherwise it's just the
-                                // record's own artist, said again.
-                                subtitle = if (track.artist != album?.artist) track.artist else "",
-                                current = current?.id == track.id,
-                                selected = if (selection.active) track.id in selection.selected else null,
-                                onClick = {
-                                    if (selection.active) {
-                                        selection.toggle(track.id)
-                                    } else {
-                                        if (current?.id != track.id) App.playback.playQueue(list, index)
-                                        go { NowPlayingScreen(it) }
-                                    }
-                                },
-                                onLongClick = {
-                                    if (!selection.active) openTrackActions(track.id, selection)
-                                },
-                            )
+                        var lastDisc: Int? = null
+                        list.forEachIndexed { index, track ->
+                            if (multiDisc && track.discNumber != lastDisc) {
+                                lastDisc = track.discNumber
+                                item(key = "disc-${track.discNumber}") {
+                                    SectionLabel("Disc ${track.discNumber ?: 1}")
+                                }
+                            }
+                            item(key = track.id) {
+                                NumberedRow(
+                                    number = track.trackNumber ?: (index + 1),
+                                    title = track.title,
+                                    subtitle = if (track.artist != album?.artist) track.artist else "",
+                                    current = current?.id == track.id,
+                                    selected = if (selection.active) track.id in selection.selected else null,
+                                    onClick = {
+                                        if (selection.active) {
+                                            selection.toggle(track.id)
+                                        } else {
+                                            if (current?.id != track.id) App.playback.playQueue(list, index)
+                                            go { NowPlayingScreen(it) }
+                                        }
+                                    },
+                                    onLongClick = {
+                                        if (!selection.active) openTrackActions(track.id, selection)
+                                    },
+                                )
+                            }
                         }
                     }
                 }
