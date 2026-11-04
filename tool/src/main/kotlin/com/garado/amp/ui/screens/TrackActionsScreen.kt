@@ -206,7 +206,7 @@ class TrackActionsScreen(
                     }
                 }
                 if (showRating && source.supportsRatings) {
-                    TextRow(title = "Rating", value = ratingStars(track.rating)) {
+                    TextRow(title = "Rating", value = ratingLabel(track.rating)) {
                         go { RatingScreen(it, track.id, track.title, track.rating, isAlbum = false) }
                     }
                 }

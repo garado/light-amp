@@ -19,9 +19,8 @@ import com.thelightphone.sdk.ui.LightIcon
 import com.thelightphone.sdk.ui.LightIcons
 import kotlinx.coroutines.launch
 
-/** "★★★☆☆" for a rating, so the choice reads at a glance. */
-fun ratingStars(stars: Int): String =
-    "★".repeat(stars.coerceIn(0, 5)) + "☆".repeat((5 - stars).coerceIn(0, 5))
+/** "81 / 100" for a rating, so the value reads at a glance. */
+fun ratingLabel(rating: Int): String = "${rating.coerceIn(0, 100)} / 100"
 
 /**
  * Pick a 1–5 star rating, or clear it.
@@ -53,7 +52,7 @@ class RatingScreen(
                     // Listed 5 stars down to none, so the common choices are first.
                     val stars = 5 - i
                     TextRow(
-                        title = if (stars == 0) "No rating" else ratingStars(stars),
+                        title = if (stars == 0) "No rating" else ratingLabel(stars),
                         onClick = {
                             if (saving) return@TextRow
                             saving = true

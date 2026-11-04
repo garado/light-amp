@@ -68,7 +68,7 @@ class AlbumActionsScreen(
                     }
                 }
                 if (album != null && album.artist.isNotBlank() && source.supportsRatings) {
-                    TextRow(title = "Rating", value = ratingStars(album.rating)) {
+                    TextRow(title = "Rating", value = ratingLabel(album.rating)) {
                         go { RatingScreen(it, album.id, album.title, album.rating, isAlbum = true) }
                     }
                 }
