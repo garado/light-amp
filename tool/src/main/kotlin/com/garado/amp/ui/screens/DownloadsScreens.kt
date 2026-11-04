@@ -53,7 +53,7 @@ private fun offlineModeDetail(mode: OfflineMode): String = when (mode) {
 }
 
 fun dataModeLabel(mode: DataMode): String = when (mode) {
-    DataMode.MAKE_IT_HURT -> "Make it Hurt"
+    DataMode.UNRESTRICTED -> "Unrestricted"
     DataMode.LOW_DATA -> "Low Data"
     DataMode.WIFI_ONLY -> "Wi-Fi Only"
 }
@@ -66,9 +66,9 @@ fun dataModeLabel(mode: DataMode): String = when (mode) {
 private const val MODE_DETAIL_LINES = 2
 
 private fun dataModeDetail(mode: DataMode): String = when (mode) {
-    DataMode.MAKE_IT_HURT -> "No limits - streaming, downloads and artwork all use cellular data when there's no Wi-Fi"
+    DataMode.UNRESTRICTED -> "Streaming, downloads and artwork all use cellular data when there's no Wi-Fi"
     DataMode.LOW_DATA -> "Streams music on cellular data, but downloads and artwork wait for Wi-Fi"
-    DataMode.WIFI_ONLY -> "Never uses cellular data. Without Wi-Fi, only your downloads play"
+    DataMode.WIFI_ONLY -> "Never uses cellular data. Without Wi-Fi, only downloaded items play"
 }
 
 /** Everything the user has downloaded, newest first. */

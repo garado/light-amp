@@ -41,7 +41,7 @@ enum class OfflineMode {
  */
 enum class DataMode {
     /** Nothing waits for Wi-Fi: downloads, covers, and streams all run on any connection. */
-    MAKE_IT_HURT,
+    UNRESTRICTED,
 
     /**
      * Off Wi-Fi, prefer whatever is downloaded over streaming it again.

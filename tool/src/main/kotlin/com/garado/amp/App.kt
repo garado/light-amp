@@ -249,7 +249,7 @@ object App {
 
     /** Whether real bytes may move: downloads, cover art. */
     fun heavyDataAllowed(): Boolean =
-        Connectivity.isUnmetered() || dataMode.value == DataMode.MAKE_IT_HURT
+        Connectivity.isUnmetered() || dataMode.value == DataMode.UNRESTRICTED
 
     private var coreReady = false
     val isReady: Boolean get() = coreReady
