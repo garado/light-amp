@@ -141,6 +141,22 @@ class PlaybackController(
     private var unmetered = false
     private var lastScrobbledId: String? = null
     private var nowPlayingId: String? = null
+
+    /** Accumulated listening time for the current track */
+    private var listenedMs = 0L
+
+    /** When the current run of actual playback began */
+    private var playStartedAtMs: Long? = null
+
+    private fun currentListenedMs(): Long {
+        val started = playStartedAtMs ?: return listenedMs
+        return listenedMs + (System.currentTimeMillis() - started)
+    }
+
+    private fun resetListened() {
+        listenedMs = 0L
+        playStartedAtMs = if (_isPlaying.value) System.currentTimeMillis() else null
+    }
     /** Identity of the queue last handed to the server — see pushQueueToServer. */
     private var lastSavedQueueKey: Int? = null
 
@@ -449,8 +465,11 @@ class PlaybackController(
                 _isPlaying.value = playing
                 if (playing) {
                     hasPlayed = true
-                } else if (hasPlayed) {
-                    rewindIfQueueFinished(p)
+                    playStartedAtMs = System.currentTimeMillis()
+                } else {
+                    playStartedAtMs?.let { listenedMs += System.currentTimeMillis() - it }
+                    playStartedAtMs = null
+                    if (hasPlayed) rewindIfQueueFinished(p)
                 }
             }
         }
@@ -548,6 +567,7 @@ class PlaybackController(
                             } ?: "stream"}",
                     )
                     _index.value = idx
+                    resetListened()
                     // A new track is a fresh stream from its own beginning —
                     // the position as much as the offset. Left standing, the
                     // position stayed the *outgoing* track's until the player
@@ -669,7 +689,7 @@ class PlaybackController(
 
         // A play is submitted part-way through rather than at the start, so the
         // position is what decides when — see maybeSubmitPlay.
-        scope.launch { _positionMs.collect { maybeSubmitPlay(it) } }
+        scope.launch { _positionMs.collect { maybeSubmitPlay() } }
         // Snapshot the queue periodically rather than on every position tick: the
         // point is to survive a kill, and a few seconds of lost progress is a fair
         // trade against writing to DataStore once a second forever.
@@ -783,6 +803,7 @@ class PlaybackController(
             _queue.value = tracks
             lastScrobbledId = null
             nowPlayingId = null
+            resetListened()
             // Start position goes in at prepare time: seekTo() clamps to the
             // duration, which is still unknown this early, so it would land on 0.
             rebuildQueueAt(p, tracks, index, position)
@@ -2667,6 +2688,7 @@ class PlaybackController(
         val p = player ?: return
         _queue.value = tracks
         lastScrobbledId = null
+        resetListened()
         // Keep the local player loaded even while casting, so switching back to
         // this device resumes instantly instead of re-preparing the queue.
         queuedSources = tracks.map { it.source() }
@@ -2853,12 +2875,14 @@ class PlaybackController(
      * This used to fire the instant a track started, which meant a queue skimmed
      * through in ten seconds logged a play for every track in it — in the local
      * counts that drive Plays sorting, and on whatever the server scrobbles to.
+     *
+     * Gated on [currentListenedMs].
      */
-    private fun maybeSubmitPlay(positionMs: Long) {
+    private fun maybeSubmitPlay() {
         val track = _queue.value.getOrNull(_index.value) ?: return
         if (LocalLibrary.isLocal(track.id)) return
         if (track.id == lastScrobbledId) return
-        if (positionMs < submitAfterMs(_durationMs.value)) return
+        if (currentListenedMs() < submitAfterMs(_durationMs.value)) return
         lastScrobbledId = track.id
         // Stamped now, sent whenever: a play that happened offline still belongs
         // at the time it happened once the server hears about it.
