@@ -32,7 +32,7 @@ data class TrackEntity(
     val playCount: Int,
     val lastPlayedMs: Long,
     val liked: Boolean,
-    /** Navidrome star rating, 0 when unrated. */
+    /** Rating 1-100, 0 when unrated. */
     val rating: Int = 0,
     val genre: String = "",
     val composer: String = "",
@@ -65,7 +65,7 @@ data class AlbumEntity(
     val playCount: Int,
     val lastPlayedMs: Long,
     val liked: Boolean,
-    /** Navidrome star rating, 0 when unrated. */
+    /** Rating 1-100, 0 when unrated. */
     val rating: Int = 0,
     val genre: String = "",
     /**

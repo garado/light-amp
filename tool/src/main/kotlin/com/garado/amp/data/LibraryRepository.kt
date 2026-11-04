@@ -1664,12 +1664,12 @@ class LibraryRepository(
      * Applied locally either way and queued when the server can't be reached, so
      * rating a record on a plane behaves like liking one does.
      */
-    suspend fun setRating(id: String, stars: Int, isAlbum: Boolean): Boolean {
-        if (isAlbum) dao.setAlbumRating(id, stars) else dao.setTrackRating(id, stars)
+    suspend fun setRating(id: String, rating: Int, isAlbum: Boolean): Boolean {
+        if (isAlbum) dao.setAlbumRating(id, rating) else dao.setTrackRating(id, rating)
         val kind = if (isAlbum) PendingAction.Kind.RATE_ALBUM else PendingAction.Kind.RATE_SONG
         val client = reachableClient()
-        if (client == null || !client.setRating(id, stars)) {
-            pending.add(PendingAction(kind, id, value = stars))
+        if (client == null || !client.setRating(id, rating)) {
+            pending.add(PendingAction(kind, id, value = rating))
         }
         return true
     }

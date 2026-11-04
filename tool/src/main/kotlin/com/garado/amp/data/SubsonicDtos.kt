@@ -131,7 +131,7 @@ data class AlbumDto(
      * appended copy can be removed exactly rather than guessed at.
      */
     val version: String? = null,
-    /** Subsonic userRating, 1–5; absent or 0 means unrated. */
+    /** Rating, 1-100; absent or 0 means unrated. */
     val userRating: Int? = null,
     val genre: String? = null,
     /**
@@ -200,7 +200,7 @@ data class SongDto(
     val path: String? = null,
     val created: String? = null,
     val starred: String? = null,
-    /** Subsonic userRating, 1–5; absent or 0 means unrated. */
+    /** Rating, 1-100; absent or 0 means unrated. */
     val userRating: Int? = null,
     val playCount: Int? = null,
     val played: String? = null,

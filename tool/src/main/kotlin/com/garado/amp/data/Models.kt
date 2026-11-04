@@ -16,7 +16,7 @@ data class Track(
     val playCount: Int,
     val lastPlayedMs: Long,
     val liked: Boolean = false,
-    /** Navidrome star rating 1–5, or 0 when unrated. */
+    /** Rating 1-100, or 0 when unrated. */
     val rating: Int = 0,
     /** Tags, when the server sends them — blank means "this library has none". */
     val genre: String = "",
@@ -119,7 +119,7 @@ data class Album(
     val playCount: Int = 0,
     val lastPlayedMs: Long = 0L,
     val liked: Boolean = false,
-    /** Navidrome star rating 1–5, or 0 when unrated. */
+    /** Rating 1-100, or 0 when unrated. */
     val rating: Int = 0,
     val genre: String = "",
 )

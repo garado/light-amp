@@ -682,15 +682,15 @@ class PlexClient(
             TimelineState.BUFFERING -> "buffering"
         }
 
-    /** Plex rates 0–10, so a star is worth two. */
-    override suspend fun setRating(id: String, stars: Int): Boolean {
+    /** Plex rates 0–10; the app's 0–100 scale divides by ten to fit. */
+    override suspend fun setRating(id: String, rating: Int): Boolean {
         send(
             "PUT",
             "/:/rate",
             listOf(
                 "key" to id,
                 "identifier" to LIBRARY_IDENTIFIER,
-                "rating" to (stars.coerceIn(0, 5) * 2).toString(),
+                "rating" to (rating.coerceIn(0, 100) / 10).toString(),
             ),
         )
         return true
@@ -1319,9 +1319,9 @@ class PlexClient(
         streamPath = media.firstOrNull()?.parts?.firstOrNull()?.key.orEmpty(),
     )
 
-    /** Plex's 0–10 back to the app's 0–5. */
+    /** Plex's 0–10 back to the app's 0–100. */
     private fun starsFrom(rating: Float?): Int =
-        rating?.let { (it / 2f).toInt().coerceIn(0, 5) } ?: 0
+        rating?.let { (it * 10f).toInt().coerceIn(0, 100) } ?: 0
 
     private fun enc(value: String): String = URLEncoder.encode(value, "UTF-8")
 

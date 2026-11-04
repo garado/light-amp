@@ -231,8 +231,8 @@ interface MusicServer {
     /** The queue this account last left somewhere, or null if the server keeps none. */
     suspend fun getPlayQueue(): SavedQueue? = null
 
-    /** 1–5, or 0 to clear. False when the server wouldn't take it. */
-    suspend fun setRating(id: String, stars: Int): Boolean = false
+    /** 1–100, or 0 to clear. False when the server wouldn't take it. */
+    suspend fun setRating(id: String, rating: Int): Boolean = false
 
     suspend fun starSong(songId: String) = Unit
     suspend fun unstarSong(songId: String) = Unit
