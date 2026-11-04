@@ -32,15 +32,11 @@ import java.net.UnknownHostException
 import javax.net.ssl.SSLException
 
 /**
- * Edit the server connection in place.
+ * Edit the server connection in place. Fields are tap-to-edit, same as the login form.
  *
- * Previously the only way to change any of this was Log Out, which threw away the
- * cached library as well — a heavy price for fixing a typo in a URL or rotating a
- * password. Fields are tap-to-edit on the LP3 keyboard, same as the login form.
- *
- * The cache is only cleared when the address or username changes, since that is
- * the case where the cached rows may belong to a different server or account; a
- * password change leaves the same library in place.
+ * The cache clears only when the address or username changes, since those are
+ * the fields that can point at a different library. A password change keeps
+ * the same library in place.
  */
 class ServerScreen(
     sealed: SealedLightActivity,
@@ -50,43 +46,23 @@ class ServerScreen(
     private val adding: Boolean = false,
 ) : SimpleLightScreen<Unit>(sealed) {
 
-    // While casting, the rocker belongs to the speaker — see handleVolumeKey.
+    // While casting, the rocker belongs to the speaker, see handleVolumeKey.
     override fun onKeyDown(keyCode: Int, event: KeyEvent): Boolean =
         App.playback.handleVolumeKey(keyCode) || super.onKeyDown(keyCode, event)
 
-    /*
-     * Form state belongs to the screen, not to the composition.
-     *
-     * The activity composes only the top of the back stack, so opening the text
-     * editor for a field tears this screen's composition down — and with it
-     * every remember{} in Content(). Held there, each value typed was written
-     * back into state that no longer existed: the Name field stayed empty no
-     * matter what you entered, and an edited Address silently reverted to the
-     * stored one when it was re-seeded from config.
-     *
-     * The screen object itself stays on the back stack, so these survive. Same
-     * pattern as PlaylistsScreen.
-     */
+    // Held on the screen object, not in composition state. Opening a field's text editor
+    // tears this screen's composition down, which would reset any remember{} in Content().
+    // The screen object itself survives on the back stack. Same pattern as PlaylistsScreen.
     private var nickname by mutableStateOf("")
     private var url by mutableStateOf<String?>(null)
     private var user by mutableStateOf<String?>(null)
-    // null means "unchanged". The stored password is never seeded into this, so
-    // it can never be rendered — the editor shows text in the clear.
+    // null means unchanged. The stored password is never seeded into this field.
     private var newPass by mutableStateOf<String?>(null)
     private var status by mutableStateOf<String?>(null)
     private var saving by mutableStateOf(false)
 
-    /**
-     * The id minted the first time Save succeeded here, so pressing it again
-     * updates that source instead of creating another.
-     *
-     * Adding is the only path that can duplicate: `source` stays null for the
-     * life of this screen, so without this every successful Save called
-     * [newSourceId] afresh and `saveSource` — an upsert keyed on id — appended
-     * rather than replaced. One user got five copies of the same server that
-     * way, because a successful save used to leave them sitting on this form
-     * with nothing to suggest it had worked.
-     */
+    // Set the first time Save succeeds while adding, so a second Save updates that
+    // source instead of minting another one.
     private var createdId: String? = null
 
     @Composable
@@ -113,9 +89,6 @@ class ServerScreen(
             ScrollableList(modifier = Modifier.fillMaxSize()) {
                 item { SectionLabel(status ?: "Tap a field to change it") }
                 if (source == null) {
-                    // Required, and first: with several sources the list is read
-                    // by name, and "navidrome.example.com" twice tells you
-                    // nothing about which is which.
                     item {
                         TextRow(
                             title = "Name",
@@ -161,8 +134,7 @@ class ServerScreen(
                             newPass != null -> "$dots · changed"
                             else -> dots
                         },
-                        // Always opens empty and masks as you type. Submitting
-                        // nothing leaves the stored password alone.
+                        // Opens empty; submitting nothing leaves the stored password alone.
                         onClick = {
                             navigateTo<String?>(
                                 { PasswordEntryScreen(it, title = "New password") },
@@ -171,10 +143,6 @@ class ServerScreen(
                         },
                     )
                 }
-                // Only how the server is reached, nothing about what it plays:
-                // quality lives on Data and Offline, and choosing a library is
-                // the Sources page under More — this form's job ends at the
-                // connection working.
                 item { SectionLabel("Connection") }
                 item {
                     TextRow(
@@ -192,17 +160,14 @@ class ServerScreen(
                                 val outcome = verifyAndSave(
                                     address.trim(),
                                     name.trim(),
-                                    // Unchanged means keep whatever is stored.
                                     newPass ?: previous?.password.orEmpty(),
                                     previous,
                                     source,
                                     nickname.trim(),
                                 )
                                 when (outcome) {
-                                    // The form has done its job; sitting on it
-                                    // saying "Saved" leaves the user to work out
-                                    // that they should press back. Go where they
-                                    // were headed.
+                                    // Navigate on to the library instead of leaving the
+                                    // user stuck on a "Saved" form.
                                     is SaveOutcome.Added -> withContext(Dispatchers.Main) {
                                         LibraryNav.selectTab(LibraryTab.ALBUMS)
                                         popToRoot()
@@ -227,17 +192,13 @@ class ServerScreen(
         )
     }
 
-    /**
-     * Ping each candidate spelling of the address before committing, so a typo
-     * can't leave the app pointed at something unreachable with no way back.
-     */
+    /** Verifies each candidate spelling of the address is reachable before saving it. */
     private suspend fun verifyAndSave(
         address: String,
         username: String,
         password: String,
         previous: SubsonicConfig?,
         source: MusicSource?,
-        /** The name the user gave a source they are adding. */
         nickname: String,
     ): SaveOutcome {
         if (address.isBlank() || username.isBlank()) {
@@ -253,8 +214,8 @@ class ServerScreen(
                 lastError = ok.exceptionOrNull()
                 continue
             }
-            // A different address or account may mean a different library, so the
-            // cached rows can't be trusted; the same server with a new password can.
+            // A changed address or account may point at a different library, so the cache
+            // is invalidated. A password-only change keeps the same library.
             val movedServer = previous != null &&
                 (previous.baseUrl != candidate || previous.username != username)
             if (movedServer) {
@@ -273,13 +234,11 @@ class ServerScreen(
                     password = password,
                 ),
             )
-            // A source added from here becomes the one being browsed: adding it
-            // is asking for it.
             if (source == null) {
                 App.settings.setActiveSource(existing.id)
                 return SaveOutcome.Added
             }
-            return SaveOutcome.Said(if (movedServer) "Saved — reloading library" else "Saved")
+            return SaveOutcome.Said(if (movedServer) "Saved, reloading library" else "Saved")
         }
         return SaveOutcome.Said(explain(lastError))
     }
@@ -290,28 +249,16 @@ private sealed interface SaveOutcome {
     /** Shown on the form; the user stays where they are. */
     data class Said(val text: String) : SaveOutcome
 
-    /** A source was added and made active — the form has nothing left to say. */
+    /** A source was added and made active. */
     data object Added : SaveOutcome
 }
 
-/**
- * What went wrong, in words that point at a fix.
- *
- * The raw exceptions are unhelpful at best and alarming at worst. Pointing this
- * at an address that answers with a web page produced, verbatim: "Unexpected
- * JSON token at offset 0: Expected start of the object '{', but had '<' instead
- * at path: $ JSON input: <!DOCTYPE html>…". Every word of that is true and none
- * of it tells you the actual problem, which is usually a reverse proxy serving
- * its own landing page on HTTPS while the server sits behind plain HTTP.
- *
- * Causes are walked because Ktor wraps: the interesting exception is rarely the
- * outermost one.
- */
+/** Turns a connection exception into a message that points at a fix. */
 private fun explain(error: Throwable?): String {
     if (error == null) return "Couldn't connect."
+    // Ktor wraps exceptions, so the cause chain is walked for the real one.
     val chain = generateSequence(error) { it.cause }.take(8).toList()
-    // Already a sentence meant for a person — "Wrong username or password",
-    // "Server returned HTTP 404." — so it is passed through as it stands.
+    // SubsonicException messages are already user-facing text, passed through as-is.
     chain.filterIsInstance<SubsonicException>().firstOrNull()?.let {
         return it.message ?: "Couldn't connect."
     }

@@ -11,13 +11,8 @@ import com.garado.amp.ui.px
 import com.garado.amp.ui.pxSp
 
 /**
- * The two-line title card the player wears in its header, and anything showing
- * the same track elsewhere.
- *
- * Sizes are in physical pixels and multiples of 3, so they are whole dp as well
- * — 45 over 36 is an album header's 18/14 rounded onto the pixel grid. Shared so
- * a screen that stands in for the player looks like the player rather than
- * approximately like it.
+ * The two-line title card the player wears in its header, shared with any
+ * screen showing the same track.
  */
 @Composable
 fun TitleCard(top: String, bottom: String) {
@@ -47,11 +42,9 @@ private const val SUB_PX = 36
 private const val SUB_LINE_PX = 42
 
 /**
- * The player header's track identity: artist, album, title — one size and
- * weight throughout, so none of the three reads as a caption for the others.
- *
- * Artist and album are ways there, not just labels — each opens the place it
- * names. The title has nowhere else to go: it's the track already playing.
+ * The player header's track identity: artist, album, title, all at one size
+ * and weight so none reads as a caption for the others. Artist and album are
+ * clickable links to their pages; title has nowhere else to go.
  */
 @Composable
 fun TrackMetadataCard(
@@ -91,5 +84,5 @@ private fun MetadataLine(text: String, onClick: (() -> Unit)? = null) {
 private const val METADATA_PX = 33
 private const val METADATA_LINE_PX = 39
 
-/** Room between the three lines — wide enough that they read as separate facts. */
+/** Room between the three lines, wide enough that they read as separate facts. */
 private const val METADATA_GAP_PX = 12

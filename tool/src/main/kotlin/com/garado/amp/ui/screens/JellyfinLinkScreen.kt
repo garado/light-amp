@@ -25,19 +25,17 @@ import kotlinx.coroutines.launch
 /**
  * A Jellyfin server, its address and an account on it.
  *
- * One screen rather than Plex's two, because Jellyfin has no account service in
- * front of the server: there is nothing to link to and no list of machines to
- * choose from. You know where your server is, and it knows who you are.
+ * One screen rather than Plex's two: Jellyfin has no account service in front
+ * of the server, so there's no separate list of machines to choose from.
  */
 class JellyfinLinkScreen(sealed: SealedLightActivity) : SimpleLightScreen<Unit>(sealed) {
 
-    // While casting, the rocker belongs to the speaker — see handleVolumeKey.
+    // While casting, the rocker belongs to the speaker. See handleVolumeKey.
     override fun onKeyDown(keyCode: Int, event: KeyEvent): Boolean =
         App.playback.handleVolumeKey(keyCode) || super.onKeyDown(keyCode, event)
 
-    // On the screen rather than in the composition: opening the keyboard for a
-    // field composes a new top-of-stack screen and tears this one's composition
-    // down, taking any remembered state with it. Same note as ServerScreen.
+    // State lives on the screen, not in composition: opening the keyboard for a
+    // field tears down this screen's composition. Same note as ServerScreen.
     private var address by mutableStateOf("")
     private var username by mutableStateOf("")
     private var password by mutableStateOf("")
@@ -75,8 +73,7 @@ class JellyfinLinkScreen(sealed: SealedLightActivity) : SimpleLightScreen<Unit>(
                     }
                 }
                 item {
-                    // Jellyfin allows an empty password, and a server set up that
-                    // way is a normal thing to point at — so this is not required.
+                    // Jellyfin allows an empty password, so this field is not required.
                     TextRow(
                         title = "Password",
                         value = if (password.isBlank()) "Leave blank if none" else "••••••••",
@@ -138,8 +135,8 @@ class JellyfinLinkScreen(sealed: SealedLightActivity) : SimpleLightScreen<Unit>(
  * source: that it answers, who we are on it, what it calls itself, and what
  * music libraries that account can see.
  *
- * Null when the address and the account don't get us in — better found here
- * than by a sync that fails after the source is already saved.
+ * Returns null if the address and account don't work, caught here rather
+ * than by a sync failing after the source is already saved.
  */
 suspend fun inspectJellyfinServer(
     uri: String,

@@ -21,7 +21,7 @@ private val KEYPAD_ROWS = listOf(
     listOf("7", "8", "9"),
 )
 
-/** A bare numeric grid — 1-9, backspace, 0, submit. No field of its own. */
+/** A bare numeric grid: 1-9, backspace, 0, submit. No field of its own. */
 @Composable
 fun NumericKeypad(
     onDigit: (String) -> Unit,

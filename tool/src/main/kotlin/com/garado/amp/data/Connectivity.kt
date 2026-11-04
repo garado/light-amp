@@ -11,20 +11,13 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 
 /**
- * What the connection costs, from the SDK's ConnectivityManager hooks.
+ * What the connection costs, from the SDK's ConnectivityManager hooks
+ * ([com.thelightphone.sdk.LightConnectivity], upstream #163/#166), which
+ * reports the active network rather than which interfaces merely hold an
+ * address.
  *
- * This replaces an interface-list heuristic — "a wlan interface with an
- * address means Wi-Fi" — that could be lied to: Android moves traffic to
- * cellular when a Wi-Fi link stops validating, and the interface keeps its
- * address while the bytes ride LTE. That is how a heavy data day happens with
- * every setting right. The SDK's [com.thelightphone.sdk.LightConnectivity]
- * (upstream #163/#166) reads the *active* network, so the answer here is about
- * the route the bytes will actually take — and the callback makes changes land
- * at once rather than on a five-second poll.
- *
- * Gates ask about *metered-ness*, not "is it Wi-Fi": a phone-hotspot Wi-Fi is
- * metered and is treated as the cellular it rides on. The settings keep saying
- * "Wi-Fi", because that is the phone in most hands.
+ * Gates check metered-ness, not "is it Wi-Fi": a phone hotspot is Wi-Fi and
+ * metered, so it is treated as the cellular connection it rides on.
  */
 object Connectivity {
 
@@ -33,7 +26,7 @@ object Connectivity {
         NetworkStatus(isConnected = false, isWifi = false, isMetered = true),
     )
 
-    /** Wired once at boot — see App.boot. */
+    /** Wired once at boot; see App.boot. */
     fun bind(context: SealedLightContext, scope: CoroutineScope) {
         status.value = runCatching { context.connectivity.currentStatus }
             .getOrDefault(status.value)
@@ -45,12 +38,8 @@ object Connectivity {
     val network: StateFlow<NetworkStatus> = status
 
     /**
-     * Whether there is a local network to speak to at all.
-     *
-     * Distinct from [isUnmetered], and the two must not be confused: a phone
-     * hotspot is Wi-Fi and metered, so it costs money *and* has neighbours.
-     * This is the question a LAN broadcast asks — is anyone there to hear it —
-     * where the gates ask what the bytes cost.
+     * Whether there is a local network to speak to at all. Distinct from
+     * [isUnmetered]: a phone hotspot is Wi-Fi and metered, so it is both.
      */
     fun isOnWifi(): Boolean = status.value.isConnected && status.value.isWifi
 
@@ -62,13 +51,10 @@ object Connectivity {
         status.map { it.isConnected && !it.isMetered }.distinctUntilChanged()
 
     /**
-     * Emits whenever the connection becomes something different — coming back
-     * after an outage, or changing what it costs.
-     *
-     * Both matter, and neither alone is enough. Going from cellular to Wi-Fi
-     * never stops being *connected*, so watching connectivity alone would miss
-     * the moment Wi-Fi Only starts allowing things again; watching the price
-     * alone would miss a plane landing with the mode set to Make it Hurt.
+     * Emits when the connection changes: comes back after an outage, or its
+     * cost changes. Both are tracked because neither alone covers both cases
+     * (cellular to Wi-Fi never stops being "connected"; losing the connection
+     * entirely doesn't change its metered-ness).
      */
     val changed: Flow<Pair<Boolean, Boolean>> =
         status.map { it.isConnected to it.isMetered }.distinctUntilChanged()

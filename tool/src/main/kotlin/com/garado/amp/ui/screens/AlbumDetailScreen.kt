@@ -41,7 +41,7 @@ class AlbumDetailScreen(
     private val albumId: String,
 ) : SimpleLightScreen<Unit>(sealed) {
 
-    // While casting, the rocker belongs to the speaker — see handleVolumeKey.
+    // While casting, the rocker belongs to the speaker. See handleVolumeKey.
     override fun onKeyDown(keyCode: Int, event: KeyEvent): Boolean =
         App.playback.handleVolumeKey(keyCode) || super.onKeyDown(keyCode, event)
 
@@ -68,14 +68,10 @@ class AlbumDetailScreen(
                 } else {
                     AppHeader(
                         onBack = { goBack() },
-                        // The album's name alone. The artist is in the facts
-                        // line below, so a second line here would repeat it.
+                        // The artist is in the facts line below, so the title omits it.
                         title = album?.title ?: "Album",
-                        // The album's own menu, not the library's sort: a record
-                        // has no order to choose, so the corner that offered a
-                        // dead sort now offers the record's verbs — download,
-                        // queue, playlist, artist. Same menu as a long-press on
-                        // the album's row, reachable from the album itself.
+                        // The album's own action menu, not a sort control. Same menu
+                        // as a long-press on the album's row.
                         rightAction = HeaderAction(
                             AppIcons.MoreHoriz,
                             onLongClick = { go { SettingsScreen(it) } },
@@ -86,11 +82,8 @@ class AlbumDetailScreen(
                     )
                 }
 
-                // Outside the list, not its first item: a scrollable row would
-                // sit inset for the scrollbar's own lane and lose the top of
-                // its height to the list's content padding — this is neither,
-                // so it centres on the true screen width and sits close under
-                // the header.
+                // Placed outside the list, not as its first item, so it isn't inset
+                // for the scrollbar lane or clipped by the list's content padding.
                 if (!selection.active && album != null) {
                     AlbumFactsRow(album, tracks.orEmpty())
                 }
@@ -139,12 +132,7 @@ class AlbumDetailScreen(
         }
     }
 
-    /**
-     * The record's own facts, one centred line above its tracklist: who made
-     * it, how many songs, how long it runs. Liking and shuffling are the •••
-     * menu's job now — see [AlbumActionsScreen] — so this line states the
-     * record rather than offering anything to do to it.
-     */
+    /** Album facts only, artist, song count, run time. Actions live in [AlbumActionsScreen]. */
     @Composable
     private fun AlbumFactsRow(album: Album, tracks: List<Track>) {
         AppText(

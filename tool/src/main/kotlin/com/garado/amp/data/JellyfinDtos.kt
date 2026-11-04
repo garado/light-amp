@@ -4,18 +4,10 @@ import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 
 /**
- * Just enough of Jellyfin's JSON to build the app's own models.
- *
- * Jellyfin is plain JSON with PascalCase names and no envelope beyond a list
- * wrapper: a query returns `{ "Items": [...], "TotalRecordCount": n }`, and a
- * single item returns the item itself. Every field here is optional with a
- * default, because Jellyfin omits what a library hasn't got rather than sending
- * nulls, and a record with no year, no cover and no genre is ordinary.
- *
- * **Times are ticks.** Jellyfin counts in 100-nanosecond units throughout —
- * durations, positions, everything. A tick is not a millisecond and reading one
- * as the other is out by a factor of ten thousand, so the conversion is named
- * ([TICKS_PER_MS]) rather than written as a magic number at each site.
+ * Just enough of Jellyfin's JSON to build the app's own models. Every field
+ * is optional with a default, since Jellyfin omits what a library hasn't got
+ * rather than sending nulls. Jellyfin counts time in 100-nanosecond ticks
+ * throughout; see [TICKS_PER_MS].
  */
 @Serializable
 data class JellyfinItems(
@@ -30,12 +22,7 @@ data class JellyfinItem(
     @SerialName("Name") val name: String = "",
     @SerialName("ServerId") val serverId: String? = null,
     @SerialName("Type") val type: String = "",
-    /**
-     * What a view holds — "music" is the one this app cares about.
-     *
-     * Only set on the entries returned by `/Users/{id}/Views`; a library of
-     * films answers "movies" and has no business in a music app.
-     */
+    /** What a view holds; "music" is the one this app cares about. Only set on `/Users/{id}/Views` entries. */
     @SerialName("CollectionType") val collectionType: String? = null,
     @SerialName("RunTimeTicks") val runTimeTicks: Long? = null,
     @SerialName("ProductionYear") val productionYear: Int? = null,
@@ -48,46 +35,30 @@ data class JellyfinItem(
     @SerialName("AlbumArtist") val albumArtist: String? = null,
     @SerialName("AlbumArtists") val albumArtists: List<JellyfinNamed> = emptyList(),
     /**
-     * The performers on *this* track, which is not the record's artist.
-     *
-     * A compilation's every track carries the album artist "Various Artists",
-     * so a client that reads only that shows a shelf of records by nobody. The
-     * track's own artists are here.
+     * The performers on this track, not the record's artist. A
+     * compilation's every track carries the album artist "Various Artists".
      */
     @SerialName("Artists") val artists: List<String> = emptyList(),
     @SerialName("ArtistItems") val artistItems: List<JellyfinNamed> = emptyList(),
     @SerialName("Genres") val genres: List<String> = emptyList(),
-    /**
-     * Jellyfin's loudness measurement in dB (10.9+), computed by its audio
-     * normalisation task — its stand-in for ReplayGain. Absent until the
-     * server has run that scan.
-     */
+    /** Jellyfin's loudness measurement in dB (10.9+), its ReplayGain stand-in. Absent until the server scans. */
     @SerialName("NormalizationGain") val normalizationGain: Float? = null,
     /**
-     * Everyone credited on the track, composers among them.
-     *
-     * Jellyfin has no composer field of its own: a composer is a person with
-     * [JellyfinPerson.type] "Composer", and the list only arrives when "People"
-     * is asked for — see FIELDS.
+     * Everyone credited on the track, composers among them. Jellyfin has no
+     * composer field of its own: a composer is a person with
+     * [JellyfinPerson.type] "Composer". Only arrives when "People" is
+     * requested; see FIELDS.
      */
     @SerialName("People") val people: List<JellyfinPerson> = emptyList(),
-    /**
-     * Which images the item actually has.
-     *
-     * Jellyfin serves an image URL for any id whether or not one exists —
-     * answering 404 at fetch time — so this is the only way to know before
-     * asking. "Primary" is the cover.
-     */
+    /** Which images the item actually has; "Primary" is the cover. Jellyfin 404s at fetch time otherwise. */
     @SerialName("ImageTags") val imageTags: Map<String, String> = emptyMap(),
     /** An album's own cover, on a track that hasn't got one of its own. */
     @SerialName("AlbumPrimaryImageTag") val albumPrimaryImageTag: String? = null,
     @SerialName("UserData") val userData: JellyfinUserData? = null,
     @SerialName("ChildCount") val childCount: Int? = null,
     /**
-     * The playlist entry's own id, which is not the track's.
-     *
-     * The same song can sit in a playlist twice, so removing "that one" needs
-     * the entry rather than the song — see JellyfinClient.removeFromPlaylistAt.
+     * The playlist entry's own id, not the track's, since the same song can
+     * sit in a playlist twice; see JellyfinClient.removeFromPlaylistAt.
      */
     @SerialName("PlaylistItemId") val playlistItemId: String? = null,
 )
@@ -99,7 +70,7 @@ data class JellyfinNamed(
     @SerialName("Name") val name: String = "",
 )
 
-/** A credited person; [type] is Jellyfin's PersonType — "Composer" and friends. */
+/** A credited person; [type] is Jellyfin's PersonType, e.g. "Composer". */
 @Serializable
 data class JellyfinPerson(
     @SerialName("Name") val name: String = "",
@@ -154,12 +125,9 @@ data class JellyfinLyricLine(
 const val TICKS_PER_MS = 10_000L
 
 /**
- * A Jellyfin date to epoch millis, or 0 when there isn't one.
- *
- * Jellyfin writes ISO-8601 with a variable number of fractional-second digits
- * and sometimes no zone at all, which is more shapes than any one parser here
- * handles — and none of the dates this reads are worth a dependency. Only the
- * date part is taken, which is all the app sorts and displays by.
+ * A Jellyfin date to epoch millis, or 0 when there isn't one. Only the date
+ * part is parsed; Jellyfin's ISO-8601 timestamps vary too much in format to
+ * be worth a full parser for fields the app only sorts and displays by day.
  */
 fun jellyfinDateMs(value: String?): Long {
     val text = value?.takeIf { it.length >= 10 } ?: return 0L

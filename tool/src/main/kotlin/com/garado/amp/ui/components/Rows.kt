@@ -51,8 +51,7 @@ fun AppArtwork(
     corner: Dp = px(10),
     fallback: ImageVector = AppIcons.MusicNote,
 ) {
-    // Not even the placeholder tile: a column of identical glyphs is the thing
-    // the setting is trying to be rid of.
+    // Skips the placeholder tile too, not just real artwork.
     if (App.hideArtwork.collectAsState().value) return
     val px = with(LocalDensity.current) { size.roundToPx() }
     val image = rememberArtwork(coverArtId, px)
@@ -77,12 +76,9 @@ fun AppArtwork(
 }
 
 /**
- * A list row in the Light music app's proportions: title at [ROW_TITLE_PX], a
- * dimmer subtitle at [ROW_SUB_PX] under it, on the 160px pitch its own lists use.
- *
- * The download mark is a small glyph immediately left of the title, where Light
- * puts it, rather than a badge at the far end of the row — at the far end it read
- * as a control rather than as a property of the track.
+ * A list row: title at [ROW_TITLE_PX], dimmer subtitle at [ROW_SUB_PX] below it.
+ * The download mark sits immediately left of the title, not as a badge at the
+ * row's far end.
  */
 @Composable
 fun TrackRow(
@@ -93,39 +89,30 @@ fun TrackRow(
     modifier: Modifier = Modifier,
     fallback: ImageVector = AppIcons.MusicNote,
     onLongClick: (() -> Unit)? = null,
-    /** Shows the offline badge — set for a downloaded song or a complete album. */
+    /** Shows the offline badge. Set for a downloaded song or a complete album. */
     downloaded: Boolean = false,
     /**
-     * Selection state, or null when the list isn't in multi-select mode.
-     *
-     * The circle takes the artwork's place rather than sitting beside it: the row
-     * is 160px with no room to spare, and swapping keeps every title on the same
-     * left edge whether or not selection is active.
+     * Selection state, or null when the list isn't in multi-select mode. The
+     * selection circle replaces the artwork slot rather than sitting beside it,
+     * keeping every title on the same left edge either way.
      */
     selected: Boolean? = null,
-    /** No artwork slot at all — a folder row, which has nothing to show there. */
+    /** No artwork slot at all, for a folder row. */
     showIcon: Boolean = true,
 ) {
     val artworkHidden = App.hideArtwork.collectAsState().value
-    // Read here rather than inside the branch below: behind an `if` this stops
-    // subscribing and the marks freeze as they were — the trap the liked
-    // switches document.
+    // Must be read unconditionally. Reading it only inside the branch below
+    // stops subscribing to the flow and the marks freeze in place.
     val marks = !App.hideDownloadIcons.collectAsState().value
     Row(
         modifier = modifier
             .fillMaxWidth()
-            // One line closes the row up to the artist rows' tighter pitch
-            // rather than leaving the second line's height empty beneath it.
             .height(px(if (subtitle.isBlank()) ROW_SINGLE_H_PX else ROW_H_PX))
             .rowClickable(onClick = onClick, onLongClick = onLongClick),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        // The download mark leads the row, in a slot of its own. Everything after
-        // it starts on the same axis whether or not the row is downloaded — and
-        // with covers switched off, that axis is where Light puts its titles.
-        // The slot stays whether or not anything is in it: it is what keeps
-        // every list's titles on one axis, and it already spends most of its
-        // life empty on rows that aren't downloaded.
+        // Slot stays present even when empty, to keep titles on one axis
+        // across rows with and without the download mark.
         Box(modifier = Modifier.width(px(ROW_LEAD_PX))) {
             if (downloaded && marks) AppIcon(AppIcons.Downloaded, size = px(ROW_MARK_PX))
         }
@@ -147,8 +134,6 @@ fun TrackRow(
             Spacer(Modifier.width(px(ROW_GAP_PX)))
         } else if (showIcon && !artworkHidden) {
             AppArtwork(coverArtId = coverArtId, size = px(ROW_ART_PX), fallback = fallback)
-            // Only when there is artwork to sit beside: with none, the title
-            // belongs against the mark, not floating a cover's gap away from it.
             Spacer(Modifier.width(px(ROW_GAP_PX)))
         }
         Column(modifier = Modifier.weight(1f)) {
@@ -171,92 +156,47 @@ fun TrackRow(
     }
 }
 
-/**
- * The list's type and pitch, in canvas pixels.
- *
- * A notch under what Light's own Music list draws (Copy 62 over Detail 41 on a
- * 163px pitch), chosen on the device: at Light's sizes the rows crowd the
- * screen and the titles shout over the covers. The 72px title axis is shared
- * with that list either way. Sized off its screenshot rather than guessed — at
- * a 163px pitch the title's caps measure ~43px and the subtitle's ~29px, which
- * at Akkurat's cap height (~0.72 em) puts the two at 60px and 42px. Shared with
- * the queue and the artist list so every row in the app is the same piece of
- * typography.
- */
+/** Row height in canvas pixels. Shared by the queue and artist list. */
 const val ROW_H_PX = 150
 
-/** A row carrying one line only — see [ArtistRow] with its counts switched off. */
+/** A row carrying one line only; see [ArtistRow] with its counts switched off. */
 const val ROW_SINGLE_H_PX = 108
 const val ROW_TITLE_PX = 54
 const val ROW_TITLE_LINE_PX = 66
 const val ROW_SUB_PX = 39
 const val ROW_SUB_LINE_PX = 48
 
-/** Cover size, and the gap beside it — the same 32px that separates two covers. */
+/** Cover size and the gap beside it. */
 const val ROW_ART_PX = 128
 const val ROW_GAP_PX = 32
 
-/**
- * The leading slot the download mark sits in.
- *
- * Sized so that what follows starts 72px from the screen's edge, which is where
- * Light's own list puts its titles: [LIST_EDGE_PX] of list padding plus this.
- */
+/** Width of the leading slot the download mark sits in. */
 const val ROW_LEAD_PX = 51
 
 private const val ROW_MARK_PX = 33
-/**
- * Smaller than a list row's own furniture, and closer to its label.
- *
- * Both are pulled in so the longest label ("Liked Albums") fits beside its
- * neighbour without truncating; at the list's usual 66/32 it was over by about
- * two characters.
- */
+/** Trimmed in from the list's usual icon/gap sizes so long action labels fit. */
 const val ROW_ACTION_ICON_PX = 57
 private const val ACTION_GAP_PX = 24
 const val ROW_ACTION_H_PX = 102
 
-/**
- * Where the left of a pair centres, with the right mirrored across the screen.
- *
- * Three tenths in: the two sit a fifth of the width either side of the middle,
- * which is close enough to read as one control with two halves. "Liked Albums"
- * fits because [ROW_ACTION_ICON_PX] and [ACTION_GAP_PX] are trimmed for these
- * rows — it was over by about two characters at the list's usual spacing.
- */
+/** X position of the left button's center in a two-button action row. */
 private const val SPLIT_LEFT_X_PX = CANVAS_W_PX * 3 / 10
 
-/** Wide enough for "Shuffle", narrow enough that the two slots don't meet. */
-/**
- * As wide as a pair can be without overlapping: half the distance between the
- * two centres, each side. "Liked Albums" needs all but a few pixels of it.
- */
+/** Max width of each slot in a two-button action row, without the slots overlapping. */
 private const val ACTION_SLOT_PX = CANVAS_W_PX - SPLIT_LEFT_X_PX * 2
 
-/**
- * A button with no neighbour can have the room a long label wants — as much as
- * fits between the screen's edge and twice its own centre.
- */
+/** Width available to a single button with no neighbor. */
 private const val SOLO_SLOT_PX = 600
 
-/** List padding, so a row's own left edge lines up with the reference's. */
+/** List padding; aligns a row's left edge with the reference app's. */
 const val LIST_EDGE_PX = 21
 
-/**
- * Top padding, set so the action row at the head of a library list sits evenly
- * between the header above it and the first cover below.
- *
- * Measured rather than derived: the gap below "Play" is the row's own slack plus
- * the 11px a 128px cover leaves inside a 150px row, and this is what makes the
- * gap above match it.
- */
+/** Top padding for a library list, set so the header row sits evenly between
+ * the app header above and the first cover below. */
 const val LIST_TOP_PX = 8
 
-/**
- * An artist row: the same metrics as a track row, minus the cover an artist
- * hasn't got — but keeping the leading slot, so names start on the axis every
- * other list's titles start on.
- */
+/** An artist row: same metrics as a track row, minus the cover, keeping the
+ * leading slot so names stay on the same axis as other list titles. */
 @Composable
 fun ArtistRow(
     name: String,
@@ -264,41 +204,32 @@ fun ArtistRow(
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
     onLongClick: (() -> Unit)? = null,
-    /** Shows the offline badge — set when every track of the artist's is downloaded. */
+    /** Shows the offline badge when every track by the artist is downloaded. */
     downloaded: Boolean = false,
-    /** The server's picture of them, where it has one — see Artist.imageId. */
+    /** The server's picture of them, where it has one; see Artist.imageId. */
     imageId: String? = null,
 ) {
-    // With pictures off the row is a line of text again, at the tighter pitch it
-    // has always had; a picture needs the taller one the track rows use. Artists
-    // can lose theirs on their own, without the sleeves going with them.
-    // Read unconditionally, both of them — see the note in TrackRow.
+    // Must read unconditionally; see the note in TrackRow.
     val wantsCovers = !App.hideArtistImages.collectAsState().value
     val local = App.source.collectAsState().value.kind == SourceKind.LOCAL
-    // The phone's own library has no artist pictures to fetch — nothing keeps
-    // them and no server can be asked — so the slot would be a column of empty
-    // circles. Text at the tighter pitch says the same thing in less room.
+    // Local library has no artist pictures to fetch, so the slot would just be
+    // empty circles; fall back to the tighter text-only row instead.
     val covers = wantsCovers && !local
-    // Read unconditionally — see the note in TrackRow.
+    // Must read unconditionally; see the note in TrackRow.
     val marks = !App.hideDownloadIcons.collectAsState().value
     Row(
         modifier = modifier
             .fillMaxWidth()
-            // One line, so the rows close up rather than leaving a gap where a
-            // second one would have been.
             .height(px(if (covers) ROW_H_PX else ROW_SINGLE_H_PX))
             .rowClickable(onClick = onClick, onLongClick = onLongClick),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        // The mark's own slot, which is also what keeps a name on the same axis
-        // as the titles in every other list.
         Box(modifier = Modifier.width(px(ROW_LEAD_PX))) {
             if (downloaded && marks) AppIcon(AppIcons.Downloaded, size = px(ROW_MARK_PX))
         }
         if (covers) {
-            // Round, where an album is square: the shape says which kind of
-            // thing this is before the name is read, and a face in a square
-            // reads as a sleeve that failed to load.
+            // Round rather than square, to read as a portrait instead of a
+            // sleeve that failed to load.
             AppArtwork(
                 imageId,
                 size = px(ROW_ART_PX),
@@ -329,7 +260,7 @@ fun PlayAllRow(
     PlayAllRow(label, modifier, onClick) { AppIcon(icon, size = px(ROW_ACTION_ICON_PX)) }
 }
 
-/** Same row, for a LightOS glyph — Light Music's own shuffle, not this app's Material one. */
+/** Same row, for a LightOS glyph instead of a Material icon. */
 @Composable
 fun PlayAllRow(
     icon: LightIconConfiguration,
@@ -350,49 +281,36 @@ private fun PlayAllRow(
     Row(
         modifier = modifier
             .fillMaxWidth()
-            // Shorter than a track row on purpose: these carry one line, and at
-            // the full 160px pitch a stack of them pushed the list itself off the
-            // screen.
             .heightIn(min = px(ROW_ACTION_H_PX))
             .appClickable(onClick = onClick),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        // Icon and label both start where the row's content starts — the covers'
-        // left edge, which is also where titles start when covers are off. An
-        // action row is a line of the list, not a row with an empty sleeve.
         Spacer(Modifier.width(px(ROW_LEAD_PX)))
         icon()
         Spacer(Modifier.width(px(ROW_GAP_PX)))
-        // Not TextRole.Button: the LP3's button style is Bold at 0.15em, which on a
-        // full-width row label reads as shouty rather than as Light's restraint.
+        // Not TextRole.Button: its Bold 0.15em style reads too heavy for a
+        // full-width row label.
         AppText(label, pxSp(ROW_TITLE_PX), lineHeight = pxSp(ROW_TITLE_LINE_PX), maxLines = 1)
     }
 }
 
-/**
- * Two action buttons side by side, each centred in its own half.
- *
- * Play and Shuffle are the same kind of thing done two ways, so they get equal
- * columns instead of one sitting above the other — which also keeps the list
- * itself two rows further up the screen.
- */
+/** Two action buttons side by side, each centred in its own half. */
 @Composable
 fun SplitActionRow(
     leftIcon: ImageVector? = null,
     leftLabel: String = "",
     onLeft: (() -> Unit)? = null,
     /**
-     * The right-hand button, or nothing.
-     *
-     * Null leaves the left one exactly where it is rather than centring it: a
-     * page whose second button arrives a moment later (an artist's popular
-     * tracks, fetched) would otherwise start centred and jump sideways.
+     * The right-hand button, or nothing. Null keeps the left button in its
+     * split-row position instead of centring it, so a button that arrives
+     * later (e.g. an artist's popular tracks, once fetched) doesn't cause the
+     * left button to jump sideways.
      */
     rightIcon: ImageVector? = null,
     rightLabel: String = "",
     onRight: (() -> Unit)? = null,
     modifier: Modifier = Modifier,
-    /** A lone button centres instead of keeping the left slot — see below. */
+    /** A lone button centres instead of keeping the left slot. See below. */
     center: Boolean = false,
 ) {
     Box(
@@ -406,10 +324,7 @@ fun SplitActionRow(
                 ActionSlot(SPLIT_LEFT_X_PX, left.first, leftLabel, left.second)
                 ActionSlot(CANVAS_W_PX - SPLIT_LEFT_X_PX, right.first, rightLabel, right.second)
             }
-            // A lone button keeps the left slot rather than moving to the
-            // middle: every one of these rows then starts on the same axis,
-            // whether or not it has a second half. Unless the caller never
-            // has a second half, in which case it's just centred.
+            // A lone button keeps the left slot position unless `center` is set.
             left != null ->
                 ActionSlot(soloX, left.first, leftLabel, left.second, SOLO_SLOT_PX)
             right != null ->
@@ -420,16 +335,10 @@ fun SplitActionRow(
 
 /**
  * One action button, centred on an absolute position across the screen.
- *
- * Positioned rather than laid out in a weighted Row, because the row lives
- * inside a list whose padding depends on what is down its right edge: the A–Z
- * strip is twice the width of the scroll bar, and the same two buttons landed
- * 16px apart on the albums list and the liked list. [centreX] is measured from
- * the screen's own left edge, so it is the same everywhere; [LIST_EDGE_PX] is
- * subtracted because that is where every list's content begins.
- *
- * The slot is kept narrow enough to stay inside the padded box on the widest of
- * them, so its tap target isn't clipped by the parent's bounds.
+ * Positioned explicitly rather than via a weighted Row, since list padding
+ * varies with whatever furniture is on its right edge. [centreX] is measured
+ * from the screen's left edge; [LIST_EDGE_PX] is subtracted since that's
+ * where list content begins.
  */
 @Composable
 private fun BoxScope.ActionSlot(
@@ -461,13 +370,7 @@ private fun ActionContent(icon: ImageVector, label: String) {
     }
 }
 
-/**
- * An album's own tracks, set a notch smaller than a library list.
- *
- * The page has already said which record this is, in the card at the top — the
- * track names are a running order rather than a list to browse, and at the
- * library's size they shouted over it.
- */
+/** An album's own tracklist, set a notch smaller than a library list. */
 private const val NUMBERED_TITLE_PX = 48
 private const val NUMBERED_TITLE_LINE_PX = 60
 private const val NUMBERED_SUB_PX = 36
@@ -475,21 +378,17 @@ private const val NUMBERED_SUB_LINE_PX = 45
 /** A row with just the title, which is most of them now the number is inline. */
 private const val NUMBERED_ROW_H_PX = 96
 
-/** A row that also carries a subtitle — who plays on the song. */
+/** A row that also carries a subtitle, e.g. who plays on the song. */
 private const val NUMBERED_ROW_TALL_PX = 141
 /** Air between the waveform/selection icon and the title that follows it. */
 private const val NUMBER_GAP_PX = 15
 
-/** Title (with its track number inline) — plus a now-playing or selection icon before it, where there is one. */
+/** Title with its track number inline, plus a now-playing or selection icon before it, where present. */
 @Composable
 fun NumberedRow(
     number: Int?,
     title: String,
-    /**
-     * The line under the title — on a record, who plays on the song. Blank
-     * drops the line and the row closes up: the caller sends a credit only
-     * when it says something the page hasn't — see AlbumDetailScreen.
-     */
+    /** Line under the title, e.g. performer credit. Blank drops the line entirely. */
     subtitle: String,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
@@ -501,19 +400,10 @@ fun NumberedRow(
     Row(
         modifier = modifier
             .fillMaxWidth()
-            // Most rows are the title alone now that the number lives in it
-            // and duration is gone — only a row with its own subtitle needs
-            // the taller pitch.
             .height(px(if (subtitle.isNotBlank()) NUMBERED_ROW_TALL_PX else NUMBERED_ROW_H_PX))
             .rowClickable(onClick = onClick, onLongClick = onLongClick),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        // No reserved gutter: the number moved into the title, so a plain row
-        // starts at the same 72px axis every other list's titles do — just a
-        // spacer, not a slot. Only a row that's current or being selected gets
-        // an icon before its text instead, and that one row's title lands
-        // wherever the icon and its gap happen to end, which is the trade the
-        // icon is worth.
         when {
             selected != null -> {
                 AppIcon(
@@ -533,12 +423,6 @@ fun NumberedRow(
             }
             else -> Spacer(Modifier.width(px(ROW_LEAD_PX)))
         }
-        // Under the title rather than across the row, which leaves long titles
-        // the whole width instead of a column of them truncating short of a
-        // right-hand gutter. On a record this line is the performer: a track's
-        // own credit is the thing that varies down an album's list — the guests
-        // on one song and not the next — where its length is a number you have
-        // to read to learn nothing.
         Column(modifier = Modifier.weight(1f)) {
             AppText(
                 if (number != null) "$number. $title" else title,
@@ -559,13 +443,7 @@ fun NumberedRow(
     }
 }
 
-/**
- * Padding shared by every list in the app.
- *
- * [LIST_EDGE_PX] puts a row's own left edge where the Light music app puts its
- * download mark; the row's leading slot then carries everything after it to the
- * 72px axis its titles sit on.
- */
+/** Padding shared by every list in the app. */
 @Composable
 fun listPadding(
     end: Dp = px(LIST_EDGE_PX),
@@ -579,11 +457,9 @@ fun listPadding(
 
 
 /**
- * A list with a scroll bar down its right edge.
- *
- * Everything but the tab lists uses this: they have the A–Z strip instead, which
- * carries its own position marker. Content is inset by the bar's lane so a long
- * title never runs underneath it.
+ * A list with a scroll bar down its right edge. Tab lists use the A-Z strip
+ * instead. Content is inset by the bar's lane so a long title never runs
+ * underneath it.
  */
 @Composable
 fun ScrollableList(
@@ -603,18 +479,15 @@ fun ScrollableList(
 }
 
 /**
- * A library list that remembers where it was.
- *
- * Thin, but named: every library page wants the same two things — an anchor so a
- * trip to another screen comes back to the same row, and a bar down the right
- * edge unless the page is one of the few that never had one.
+ * A library list that remembers its scroll position across navigation, with
+ * an optional scroll bar.
  */
 @Composable
 fun LibraryList(
     anchor: String,
     modifier: Modifier = Modifier,
     headerCount: Int = 0,
-    /** The right-hand lane and its bar, as the few lists that never had one. */
+    /** Whether to show the right-hand scroll bar. */
     scrollBar: Boolean = true,
     content: LazyListScope.() -> Unit,
 ) {

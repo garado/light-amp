@@ -20,13 +20,13 @@ import kotlinx.coroutines.launch
 
 class AddToPlaylistScreen(
     sealed: SealedLightActivity,
-    /** One or many — a multi-selection adds in list order. */
+    /** One or many. A multi-selection adds in list order. */
     private val trackIds: List<String>,
 ) : SimpleLightScreen<Unit>(sealed) {
 
     constructor(sealed: SealedLightActivity, trackId: String) : this(sealed, listOf(trackId))
 
-    // While casting, the rocker belongs to the speaker — see handleVolumeKey.
+    // While casting, the rocker belongs to the speaker. See handleVolumeKey.
     override fun onKeyDown(keyCode: Int, event: KeyEvent): Boolean =
         App.playback.handleVolumeKey(keyCode) || super.onKeyDown(keyCode, event)
 

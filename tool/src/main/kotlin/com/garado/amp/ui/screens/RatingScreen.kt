@@ -38,11 +38,10 @@ private const val MAX_RATING_DIGITS = 3
 fun ratingLabel(rating: Int): String = "${rating.coerceIn(0, 100)} / 100"
 
 /**
- * Enter a 0–100 rating on a bare numeric keypad, digits only.
+ * Enter a 0-100 rating on a numeric keypad.
  *
- * The rating is written to the server first and only cached locally once it's
- * accepted — see LibraryRepository.setRating, which also queues it for retry
- * when the server can't be reached right now.
+ * The rating is written to the server first and cached locally only once accepted.
+ * See LibraryRepository.setRating, which queues retries if the server is unreachable.
  */
 class RatingScreen(
     sealed: SealedLightActivity,
@@ -52,7 +51,7 @@ class RatingScreen(
     private val isAlbum: Boolean,
 ) : SimpleLightScreen<Unit>(sealed) {
 
-    // While casting, the rocker belongs to the speaker — see handleVolumeKey.
+    // While casting, the rocker belongs to the speaker, see handleVolumeKey.
     override fun onKeyDown(keyCode: Int, event: KeyEvent): Boolean =
         App.playback.handleVolumeKey(keyCode) || super.onKeyDown(keyCode, event)
 
@@ -113,8 +112,8 @@ class RatingScreen(
                 NumericKeypad(
                     onDigit = { digit ->
                         if (draft.length < MAX_RATING_DIGITS) {
-                            // Collapses a leading zero from typing over a prefilled
-                            // "0" rather than needing a backspace first.
+                            // Drops the leading zero so typing over the prefilled "0" works
+                            // without a backspace first.
                             val candidate = (draft + digit).trimStart('0').ifEmpty { "0" }
                             if ((candidate.toIntOrNull() ?: 0) <= MAX_RATING) draft = candidate
                         }

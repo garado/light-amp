@@ -29,26 +29,15 @@ import kotlinx.coroutines.withContext
 class ArtworkLoader(
     filesDir: File,
     private val serverClient: StateFlow<MusicServer?>,
-    /** Whether a cover may be fetched over the network now — see App.heavyDataAllowed. */
+    /** Whether a cover may be fetched over the network now; see App.heavyDataAllowed. */
     private val fetchAllowed: () -> Boolean = { true },
-    /**
-     * Whether covers are switched off entirely — see App.hideArtwork.
-     *
-     * Only [prefetch] asks. The drawing path is already stopped a level up, in
-     * rememberArtwork, which is where switching covers off stops them being
-     * fetched and decoded; this is the other way in, and it had no such gate.
-     */
+    /** Whether covers are switched off entirely; see App.hideArtwork. Checked only by [prefetch]. */
     private val artworkOff: () -> Boolean = { false },
     /**
      * Which source a cover belongs to, read at the moment it is asked for.
-     *
-     * Cover ids are only unique *within* a server, and [serverClient] is
-     * whichever one is active now — so without this a Plex id could be fetched
-     * from Navidrome, and the answer filed under that id for good. Which is
-     * exactly what happened: Navidrome replied "not found" as JSON, 185 bytes of
-     * it went into the cache as though it were a sleeve, and every later request
-     * for that cover read it back and failed to decode. No amount of fixing the
-     * URL could help, because nothing was ever fetched again.
+     * Cover ids are only unique within a server, so caching must be keyed by
+     * source id or an id can be fetched from the wrong server and filed under
+     * that id permanently.
      */
     private val sourceId: () -> String,
 ) {
@@ -57,14 +46,7 @@ class ArtworkLoader(
     private val memory = object : LruCache<String, ImageBitmap>(MEMORY_ENTRIES) {}
     private val gate = Semaphore(FETCH_CONCURRENCY)
 
-    /**
-     * A cover already decoded at this size, without suspending.
-     *
-     * Lets a list draw its covers on the *first* frame instead of a frame later:
-     * without it, every return to a list showed a page of empty placeholders that
-     * filled in a moment afterwards, even though the bitmaps were in memory the
-     * whole time.
-     */
+    /** A cover already decoded at this size, without suspending, for drawing on the first frame. */
     fun peek(coverArtId: String?, targetSizePx: Int): ImageBitmap? {
         if (coverArtId.isNullOrBlank()) return null
         return memory.get(memoryKey(coverArtId, sizeBucket(targetSizePx)))
@@ -80,10 +62,8 @@ class ArtworkLoader(
         memory.get(memKey)?.let { return it }
 
         return withContext(Dispatchers.IO) {
-            // Cached bytes are trusted only as far as they decode. Anything
-            // already on disk that turns out not to be a picture is thrown away
-            // and asked for again — otherwise one bad answer, cached once, is a
-            // cover that stays broken for the life of the install.
+            // Cached bytes that don't decode as an image are discarded and
+            // re-fetched rather than trusted forever.
             val source = sourceId()
             val cached = readDisk(source, coverArtId)?.takeIf { looksLikeImage(it) }
             if (cached == null) diskFile(source, coverArtId).delete()
@@ -97,22 +77,13 @@ class ArtworkLoader(
     }
 
     /**
-     * Put a cover on disk without decoding it.
-     *
-     * Called as tracks are downloaded, so an offline library has its sleeves —
-     * [load] finds them in the same place it would have written them itself.
-     *
-     * Names its source and its client rather than reading the active ones:
-     * downloads run for every source whichever is being browsed, so the sleeve
-     * of a Plex track landing while Navidrome is on screen has to be asked of
-     * Plex and filed under Plex — the other way round is how a "not found"
-     * body once became a cover that could never load again (see [sourceId]).
+     * Put a cover on disk without decoding it. Called as tracks are downloaded
+     * so an offline library has its sleeves. Takes its source and client as
+     * parameters rather than reading the active ones, because downloads run
+     * for every source regardless of which one is being browsed.
      */
     suspend fun prefetch(sourceId: String, client: MusicServer, coverArtId: String?) {
         if (coverArtId.isNullOrBlank()) return
-        // Downloading an album pulled its sleeve down even with artwork turned
-        // off — a quarter-megabyte per record, for a picture the app had been
-        // told never to draw.
         if (artworkOff()) return
         withContext(Dispatchers.IO) {
             if (diskFile(sourceId, coverArtId).let { it.exists() && it.length() > 0 }) return@withContext
@@ -121,23 +92,17 @@ class ArtworkLoader(
     }
 
     private suspend fun fetch(client: MusicServer?, coverArtId: String): ByteArray? {
-        // A local track's cover id is its own path: the sleeve is inside the
-        // file, and there is no server to ask for it.
+        // A local track's cover id is its own file path: the sleeve is
+        // embedded, and there is no server to ask.
         LocalLibrary.fileOf(coverArtId)?.let { return embedded(it) }
-        // A cover is a quarter-megabyte at panel size, so it waits for cheap
-        // bytes: the placeholder shows, nothing is cached, and the next look
-        // on Wi-Fi fetches as though this never happened.
         if (!fetchAllowed()) return null
         if (client == null) return null
         val sized = client.coverArtUrl(coverArtId, panelWidthPx)
         val original = client.coverArtUrl(coverArtId)
-        // Not all at once. A grid asks for a screenful of covers the moment it
-        // appears, and thirty of those in flight over a connection that leaves
-        // the house is how they all become slow and some of them time out.
+        // Limit concurrent fetches: a grid can ask for a screenful of covers
+        // at once.
         return gate.withPermit {
-            // The full-size URL is kept as a fallback: a server that can't
-            // resize, or a resizer that isn't answering, should cost a slower
-            // cover rather than a missing one.
+            // Fall back to the full-size URL if the server can't resize.
             download(sized) ?: download(original.takeIf { it != sized })
         }
     }
@@ -153,12 +118,7 @@ class ArtworkLoader(
         }
     }
 
-    /**
-     * The picture tagged into an audio file.
-     *
-     * [MediaMetadataRetriever] takes a path and needs no context, which is what
-     * makes it usable from a tool at all — see LocalLibrary.
-     */
+    /** The picture tagged into an audio file. */
     private fun embedded(file: File): ByteArray? {
         val retriever = MediaMetadataRetriever()
         return try {
@@ -176,18 +136,16 @@ class ArtworkLoader(
 
     private fun readDisk(sourceId: String, coverArtId: String): ByteArray? {
         val file = diskFile(sourceId, coverArtId).takeIf { it.exists() && it.length() > 0 } ?: return null
-        // Reading is use. The budget evicts by last use, and a read leaves no
-        // mark of its own — so the covers you look at are the ones that stay.
+        // Touch the mtime on read so the LRU trim evicts by last use.
         file.setLastModified(System.currentTimeMillis())
         return file.readBytes()
     }
 
     /**
-     * Drop one source's covers — on Log Out, with its library.
-     *
-     * Files are named by a hash of source and cover id, so a source's files
-     * can't be told apart on disk; the caller reads the ids out of the
-     * source's own database before that database is cleared, and names them.
+     * Drop one source's covers, called when its library is removed. The
+     * caller must read the cover ids out of that source's database before
+     * clearing it, since cover files are named by hash and can't otherwise be
+     * matched to a source.
      */
     suspend fun forget(sourceId: String, coverArtIds: Collection<String>) {
         withContext(Dispatchers.IO) {
@@ -197,15 +155,10 @@ class ArtworkLoader(
     }
 
     /**
-     * Hold the cache to [DISK_BUDGET_BYTES], least recently used first.
-     *
-     * Run once at launch, off the main thread, which is also what brings an
-     * install from before there was a budget down to it: the cache used to
-     * grow for ever, a cover for every album ever scrolled past, and nothing
-     * cleared it. [keep] names the files that must survive whatever the
-     * budget says — the covers of downloaded albums, which are the offline
-     * sleeves and belong to their songs rather than to this cache; they go
-     * when the songs do. See App.protectedCoverFiles.
+     * Hold the cache to [DISK_BUDGET_BYTES], evicting least recently used
+     * first. [keep] names files that must survive regardless: the covers of
+     * downloaded albums, which belong to their songs and are freed only when
+     * the songs are. See App.protectedCoverFiles.
      */
     suspend fun trimToBudget(keep: Set<String>) = withContext(Dispatchers.IO) {
         val files = diskDir.listFiles().orEmpty().filter { it.isFile }
@@ -230,14 +183,7 @@ class ArtworkLoader(
     /** The file a cover is kept in, for anything naming files to keep or drop. */
     fun fileNameFor(sourceId: String, coverArtId: String): String = md5Hex("$sourceId|$coverArtId")
 
-    /**
-     * Whether these bytes are a picture at all.
-     *
-     * A server can answer a cover request with a 200 and something else
-     * entirely — an error document, a login page — and the only thing that
-     * makes that obvious is the first few bytes. Kept without this check, one
-     * such answer becomes a cover that can never load again.
-     */
+    /** Whether these bytes are a picture, checked by magic number since a server can 200 an error page. */
     private fun looksLikeImage(bytes: ByteArray): Boolean {
         if (bytes.size < 12) return false
         fun at(i: Int) = bytes[i].toInt() and 0xFF
@@ -283,12 +229,7 @@ class ArtworkLoader(
         return sample
     }
 
-    /**
-     * The panel's own width, told to the loader by the first themed frame — the
-     * fetch size on any panel, as [FETCH_PX] is on the LP3. A plain field is
-     * enough for a hint read at fetch time, and until that frame the LP3's
-     * width stands in.
-     */
+    /** The panel's own fetch width, set by the first themed frame; defaults to the LP3's width. */
     @Volatile
     var panelWidthPx: Int = FETCH_PX
 
@@ -305,28 +246,16 @@ class ArtworkLoader(
         private const val MEMORY_ENTRIES = 150
 
         /**
-         * The size covers are fetched at, whatever they are drawn at.
-         *
-         * One file per cover, sized for the largest place it is ever shown —
-         * the player's full-width square, which is the screen's own width: the
-         * LP3 panel is 1080px across, so 1080, not a power of two. Rows
-         * downsample from the same bytes, so a page of thumbnails costs one
-         * fetch each rather than one per size, and an album opened after its row
-         * was drawn needs no second trip.
+         * The size covers are fetched at: the LP3 panel's full width (1080px),
+         * the largest place a cover is ever shown. Smaller views downsample
+         * from the same cached bytes.
          */
         private const val FETCH_PX = 1080
 
         /** How many covers are fetched at once; the rest wait their turn. */
         private const val FETCH_CONCURRENCY = 4
 
-        /**
-         * What the covers on disk may add up to, beyond the protected ones.
-         *
-         * At [FETCH_PX] a cover runs 90–280 KB, so this holds roughly a
-         * thousand of the most recently seen — several screens of any
-         * library — while a collection of five thousand albums no longer
-         * turns into a gigabyte of sleeves nobody asked to keep.
-         */
+        /** What the covers on disk may add up to, beyond the protected ones. */
         private const val DISK_BUDGET_BYTES = 200L * 1024 * 1024
     }
 }

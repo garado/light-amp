@@ -36,10 +36,8 @@ data class SubsonicBody(
 
 /**
  * getPlayQueue: what this account was last playing, on whichever client saved it.
- *
- * `current` is a song id, and servers disagree about its type — so it is decoded
- * as a raw primitive and read back as text, the same treatment [MusicFolderDto]
- * needs for the same reason.
+ * `current` decodes as a raw primitive since servers disagree about its
+ * type; see [MusicFolderDto] for the same issue.
  */
 @Serializable
 data class PlayQueueDto(
@@ -125,20 +123,18 @@ data class AlbumDto(
     val originalReleaseDate: ItemDateDto? = null,
     val releaseDate: ItemDateDto? = null,
     /**
-     * OpenSubsonic album version — Navidrome fills this from the MusicBrainz
-     * release comment ("printed in EU", "price code CA 835") and *also* appends it
-     * to [name] so clients that don't know the field still see it. Kept so the
-     * appended copy can be removed exactly rather than guessed at.
+     * OpenSubsonic album version. Navidrome fills this from the MusicBrainz
+     * release comment and also appends it to [name], so this field lets the
+     * appended copy be stripped exactly rather than guessed at.
      */
     val version: String? = null,
     /** Rating, 1-100; absent or 0 means unrated. */
     val userRating: Int? = null,
     val genre: String? = null,
     /**
-     * OpenSubsonic's structured album-artist credit, and the reliable one: the
-     * legacy [artist] flattens several names into one string with whichever
-     * separator the server likes. Taking the names from here means the app does
-     * its own joining and never has to guess where one ends.
+     * OpenSubsonic's structured album-artist credit, more reliable than the
+     * legacy [artist] string, which flattens multiple names with whatever
+     * separator the server likes.
      */
     val artists: List<AlbumArtistDto> = emptyList(),
     /** OpenSubsonic's single-string form of the same credit. */
@@ -181,9 +177,8 @@ data class SongDto(
     val artist: String? = null,
     val albumArtist: String? = null,
     /**
-     * OpenSubsonic's name for the same thing, and the one Navidrome actually
-     * sends: the base Subsonic Child has no albumArtist field at all, so the
-     * plain spelling above stays only for servers that add it themselves.
+     * OpenSubsonic's name for the same field, and the one Navidrome actually
+     * sends (the base Subsonic Child has no plain `albumArtist`).
      */
     val displayAlbumArtist: String? = null,
     val albumId: String? = null,
@@ -208,15 +203,13 @@ data class SongDto(
     val genre: String? = null,
     val composer: String? = null,
     /**
-     * As with the album artist, composer is an OpenSubsonic field under a name
-     * of its own — there is no plain `composer` on a Child. Reading only the
-     * plain spelling is why the library never reported having any composers,
-     * and so why the Composers page never appeared.
+     * OpenSubsonic's name for the composer field; there is no plain
+     * `composer` on a Child.
      */
     val displayComposer: String? = null,
     /**
      * OpenSubsonic ReplayGain, sent when the file is tagged. Gains are dB
-     * relative to reference loudness — negative for loud masters.
+     * relative to reference loudness; negative for loud masters.
      */
     val replayGain: ReplayGainDto? = null,
 )

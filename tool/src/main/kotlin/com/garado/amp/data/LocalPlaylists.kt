@@ -6,20 +6,11 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
 /**
- * Playlists for the phone's own music, kept as `.m3u8` files on the phone.
- *
- * A local source has no server to hold them, so they live beside the music in
- * `Music/Amp/Playlists` in the format every other music player already reads.
- * That is the point of choosing M3U over something of our own: a playlist made
- * here opens in VLC or foobar or Navidrome's importer, and one made anywhere
- * else shows up here. Dropping a `.m3u8` into the folder over adb is a
- * supported way to make a playlist.
- *
- * Entries are absolute paths, which is also exactly what a track id is once
- * [LocalLibrary.ID_PREFIX] is taken off — so the mapping in both directions is
- * a string operation and never needs the library to be loaded.
- *
- * Everything here touches the disk, so it all runs on [Dispatchers.IO].
+ * Playlists for the phone's own music, kept as `.m3u8` files in
+ * `Music/Amp/Playlists`, readable by any other music player. Entries are
+ * absolute paths, the same shape as a track id once [LocalLibrary.ID_PREFIX]
+ * is stripped, so the mapping is a string operation with no library lookup
+ * needed. Everything here runs on [Dispatchers.IO].
  */
 object LocalPlaylists {
 
@@ -40,13 +31,7 @@ object LocalPlaylists {
     private fun fileOf(id: String): File? =
         if (id.startsWith(ID_PREFIX)) File(id.removePrefix(ID_PREFIX)) else null
 
-    /**
-     * A name safe to be a filename.
-     *
-     * The name *is* the filename — there is no sidecar recording the real one —
-     * so anything the filesystem would choke on has to go. A name that reduces
-     * to nothing still needs a file, hence the fallback.
-     */
+    /** A name safe to be a filename, since there's no sidecar recording the real one. */
     private fun fileNameFor(name: String): String {
         val cleaned = name.trim().replace(Regex("""[/\\:*?"<>|]"""), "_").take(120)
         return (cleaned.ifBlank { "Playlist" }) + EXTENSION
@@ -61,8 +46,8 @@ object LocalPlaylists {
             Playlist(
                 id = idFor(file),
                 name = file.name.removeSuffix(EXTENSION),
-                // The first track's own file, so the row gets the same embedded
-                // cover the track would show. See ArtworkLoader.
+                // The first track's own file, for the same embedded cover
+                // the track would show; see ArtworkLoader.
                 coverArtId = ids.firstOrNull(),
                 createdAt = file.lastModified(),
                 updatedAt = file.lastModified(),
@@ -131,18 +116,11 @@ object LocalPlaylists {
     }
 
     /**
-     * Track ids from a playlist file.
-     *
-     * Comments and blank lines are skipped, so an `#EXTM3U` header and the
-     * `#EXTINF` lines other players write are read without complaint. Relative
-     * paths resolve against the file's own folder, which is what a playlist
-     * written by another tool will normally contain.
-     *
-     * Paths are canonicalised, which matters more than it looks: `/sdcard` is a
-     * symlink to `/storage/emulated/0`, and an id is only ever compared as text.
-     * A playlist written elsewhere with `/sdcard/...` entries would otherwise
-     * produce ids that match nothing in the library, and every track in it would
-     * quietly disappear rather than fail in any visible way.
+     * Track ids from a playlist file. Comments and blank lines are
+     * skipped. Paths are canonicalized, since `/sdcard` is a symlink to
+     * `/storage/emulated/0` and an id is only ever compared as text: without
+     * this, a playlist with `/sdcard/...` entries would match nothing in
+     * the library.
      */
     private fun readIds(file: File): List<String> = runCatching {
         file.readLines()

@@ -12,25 +12,17 @@ import com.thelightphone.lp3Keyboard.ui.viewmodel.Lp3RepeatableKeyboardCallback
 import com.thelightphone.sdk.ui.keyboard.LightEmbeddedLp3Keyboard
 
 /**
- * The LP3's own keyboard, against the bottom of the search page.
- *
- * The SDK hosts this inside [com.thelightphone.sdk.ui.LightTextInputEditor],
- * which is a whole screen: the text sits at the top with nothing below it, which
- * is no use to a search that has to show its results narrowing as you type. The
- * keyboard itself is a composable though, and the view model that drives it is
- * public — so the page keeps its own layout and simply places the keyboard last.
- *
- * Nothing in the SDK is patched or worked around to do this. The one thing not
- * reused is `TextInputKeyboardCallback`, which is `internal`, so
- * [SearchKeyboardCallback] below implements the same public interface instead.
+ * The LP3 keyboard, placed at the bottom of the search page instead of inside
+ * the SDK's [com.thelightphone.sdk.ui.LightTextInputEditor] screen, so results
+ * can narrow below it as the user types. The keyboard composable and its view
+ * model are public; only `TextInputKeyboardCallback` is internal, so
+ * [SearchKeyboardCallback] reimplements its public interface.
  */
 @Composable
 fun SearchKeyboard(state: TextFieldState, onReturn: () -> Unit) {
     val callback = remember(state) { SearchKeyboardCallback(state, onReturn) }
     val options = rememberPhoneKeyboardOptions()
-    // Held in remember rather than through viewModel(): the tool doesn't carry
-    // lifecycle-viewmodel-compose, and this is a state holder for a view that
-    // lives exactly as long as the typing does.
+    // Held via remember, not viewModel(): the tool doesn't depend on lifecycle-viewmodel-compose.
     val keyboard = remember(callback) {
         EnQwertyLp3KeyboardViewModel<Unit>(
             callback,
@@ -42,15 +34,9 @@ fun SearchKeyboard(state: TextFieldState, onReturn: () -> Unit) {
 }
 
 /**
- * What the keys do to the query.
- *
- * A port of the SDK's own `TextInputKeyboardCallback`, which is `internal` and so
- * cannot be reused from a tool. Single-line throughout — a search is one line —
- * so Return ends the typing rather than inserting a break.
- *
- * **If the SDK's editing behaviour changes, this will not follow.** It is a copy
- * of a private thing, which is the one real cost of hosting the keyboard here;
- * the alternative was to make that class public, which means patching the SDK.
+ * Ports the SDK's internal `TextInputKeyboardCallback` for use here. Single-line
+ * only: Return submits the search instead of inserting a line break. This copy
+ * will not pick up changes to the SDK's version.
  */
 private class SearchKeyboardCallback(
     private val state: TextFieldState,
@@ -69,7 +55,7 @@ private class SearchKeyboardCallback(
 
     override fun onSpecialKeyReleased(key: SpecialKey) {
         when (key) {
-            // Surrogate-aware, or deleting an emoji leaves half of one behind.
+            // Counts surrogate pairs as one unit, or deleting an emoji leaves half of one behind.
             SpecialKey.Backspace -> deleteBefore(surrogateAwareCount())
             SpecialKey.Return -> onReturn()
             else -> Unit

@@ -36,7 +36,7 @@ data class SubsonicConfig(
     }
 }
 
-/** [code] is the Subsonic API error code (0 when there wasn't one to carry — an HTTP-level or decode failure). */
+/** [code] is the Subsonic API error code (0 for an HTTP-level or decode failure). */
 class SubsonicException(message: String, val code: Int = 0) : Exception(message)
 
 /**
@@ -84,20 +84,12 @@ class SubsonicClient(val config: SubsonicConfig) : MusicServer {
 
     /**
      * A copy to keep, rather than something to play.
-     *
-     * At original quality that is `download`, which is the endpoint for exactly
-     * this and hands back the stored file untouched. `stream` would serve the
-     * same bytes, but it is a *playback* endpoint — a Subsonic server is
-     * entitled to treat a request to it as a play, and filling the phone with a
-     * library should not rewrite its play counts.
-     *
-     * At any other quality there is nothing to switch to: `download` never
-     * transcodes, so the streaming endpoint is the only way to a smaller file.
-     * That is sound here in a way it was not on Plex — Navidrome and friends
-     * transcode mp3 at a constant bitrate, where a player's size ÷ bitrate
-     * fallback is arithmetic rather than a guess, so the missing duration
-     * header costs nothing. A server configured for a *variable* rate would
-     * land in Plex's hole, and this is the seam where that would be fixed.
+     * At original quality, uses `download`, not `stream`: a server can treat
+     * a `stream` request as a play, and filling the phone with a library
+     * shouldn't inflate play counts. At any other quality, `download` never
+     * transcodes, so `stream` is the only way to get a smaller file. That's
+     * safe here, unlike on Plex, because Navidrome transcodes at a constant
+     * bitrate.
      */
     override fun downloadUrl(track: Track, format: StreamFormat): String =
         if (format == StreamFormat.RAW) {
@@ -112,14 +104,11 @@ class SubsonicClient(val config: SubsonicConfig) : MusicServer {
         format: StreamFormat,
         timeOffsetSeconds: Int,
         /**
-         * Ask the server to declare an estimated Content-Length.
-         *
-         * On for playback, where it lets the player byte-seek within a transcoded
-         * stream instead of reloading from 0:00. **Off for downloads:** the estimate
-         * is only an estimate, and when the real encode comes out shorter the client
-         * sits waiting for bytes that never arrive and dies with
-         * `ProtocolException: unexpected end of stream` partway through the file.
-         * A download would rather read to EOF and take whatever length is real.
+         * Asks the server to declare an estimated Content-Length.
+         * On for playback, so the player can byte-seek within a transcoded
+         * stream. Off for downloads: if the real encode is shorter than
+         * estimated, the client waits for bytes that never arrive and throws
+         * `ProtocolException: unexpected end of stream`.
          */
         estimateContentLength: Boolean,
         /** Subsonic has no session concept; unused here. */
@@ -210,28 +199,21 @@ class SubsonicClient(val config: SubsonicConfig) : MusicServer {
     /** An album's songs. */
     override suspend fun getAlbumTracks(albumId: String): List<Track> {
         val body = request("getAlbum", listOf("id" to albumId))
-        // Songs carry the same appended comment in their album tag, and unlike the
-        // album they have no version field of their own — so clean them with the
-        // parent album's, which this response already includes.
+        // Songs carry the album tag's appended comment but no version field
+        // of their own, so clean them using the parent album's version.
         val albumName = body.album?.let { albumTitle(it.name ?: it.title, it.version) }
-        // The record's own artist, taken from the same parent. AlbumID3.artist
-        // is the album artist by definition, where a song Child's albumArtist is
-        // whatever the file happened to carry — so this is the authoritative
-        // answer for every track on the album, and the one the app files them
-        // under. Without it a track whose file has no ALBUMARTIST tag fell back
-        // to its own artist, which is what gave every guest on a "feat." credit
-        // a row of their own in the Artists list.
+        // AlbumID3.artist is the authoritative album artist. A song's own
+        // albumArtist tag is unreliable; falling back to it put every
+        // "feat." credit in its own row in the Artists list.
         val albumArtist = body.album?.let { a ->
-            // Joined here, with the separator the app splits on, so a record
-            // credited to more than one artist comes apart again cleanly —
-            // see Track.albumArtistNames.
+            // Joined with the separator the app splits on; see Track.albumArtistNames.
             a.artists.mapNotNull { it.name?.trim()?.takeIf(String::isNotEmpty) }
                 .takeIf { it.isNotEmpty() }
                 ?.joinToString("; ")
                 ?: a.displayArtist?.takeIf { it.isNotBlank() }
                 ?: a.artist
         }
-        // The album's own cover for every track on it — see toTrack.
+        // The album's own cover is used for every track on it; see toTrack.
         return body.album?.song.orEmpty().map { it.toTrack(albumName, albumArtist, body.album?.coverArt) }
     }
 
@@ -247,9 +229,8 @@ class SubsonicClient(val config: SubsonicConfig) : MusicServer {
     override suspend fun getArtistIndex(musicFolderId: String?): List<ArtistRef> {
         val body = request("getArtists", musicFolderParam(musicFolderId))
         return body.artists?.index.orEmpty().flatMap { it.artist }.mapNotNull { dto ->
-            // The artist's own id doubles as a cover id: Navidrome answers
-            // getCoverArt for one with the artist's picture. A server that
-            // doesn't simply has no art to show, which the loader handles.
+            // The artist's id doubles as a cover id; Navidrome serves
+            // getCoverArt for it with the artist's picture.
             ArtistRef(
                 id = dto.id,
                 name = dto.name ?: return@mapNotNull null,
@@ -258,11 +239,6 @@ class SubsonicClient(val config: SubsonicConfig) : MusicServer {
         }
     }
 
-    /**
-     * An artist's most popular songs. Navidrome answers this from its Last.fm
-     * agent, matched back onto the local library, so it needs Last.fm configured
-     * server-side; it returns an empty list rather than failing when it isn't.
-     */
     override val streamFormats: List<StreamFormat> get() = STREAM_FORMATS
 
     override suspend fun startServerScan(musicFolderId: String?): Boolean =
@@ -271,14 +247,16 @@ class SubsonicClient(val config: SubsonicConfig) : MusicServer {
     override suspend fun serverScanning(musicFolderId: String?): Boolean =
         runCatching { request("getScanStatus").scanStatus?.scanning }.getOrNull() ?: false
 
+    /**
+     * An artist's most popular songs. Navidrome answers this from its
+     * Last.fm agent; returns an empty list, not an error, if Last.fm isn't configured.
+     */
     override suspend fun getTopSongs(artistName: String, count: Int): List<Track> {
         return try {
             val body = request(
                 "getTopSongs",
-                // Omitted rather than sent as 0: Subsonic reads `count` as the
-                // number of songs to return, so a literal 0 asks the server for
-                // nothing and it obliges. Leaving it out gets the server's own
-                // default, which is what "unspecified" should mean.
+                // Omitted rather than sent as 0: Subsonic treats `count=0` as
+                // "return nothing." Leaving it out gets the server's own default.
                 listOf("artist" to artistName) +
                     if (count > 0) listOf("count" to count.toString()) else emptyList(),
             )
@@ -289,16 +267,15 @@ class SubsonicClient(val config: SubsonicConfig) : MusicServer {
     }
 
     /**
-     * `getSimilarSongs` takes the song's own id — checked against the public
-     * demo — and Navidrome resolves it to the artist before asking its Last.fm
-     * agent for artists like them. With no agent it still answers from that
-     * artist's own catalogue, so the radio narrows rather than vanishes.
+     * `getSimilarSongs` takes the song's own id. Navidrome resolves it to
+     * the artist, then asks Last.fm for similar artists. Without Last.fm
+     * configured, it still answers from the artist's own catalogue.
      */
     override suspend fun getSimilarSongs(songId: String, count: Int): List<Track> {
         return try {
             val body = request(
                 "getSimilarSongs",
-                // Omitted rather than sent as 0 — see getTopSongs.
+                // Omitted rather than sent as 0; see getTopSongs.
                 listOf("id" to songId) +
                     if (count > 0) listOf("count" to count.toString()) else emptyList(),
             )
@@ -318,12 +295,10 @@ class SubsonicClient(val config: SubsonicConfig) : MusicServer {
         Unit.also { request("unstar", listOf("artistId" to artistId)) }
 
     /**
-     * Register a play, optionally at the time it actually happened.
-     *
-     * [atMs] matters for plays replayed after an outage: without it Navidrome
-     * timestamps the scrobble on arrival, and a week of offline listening lands
-     * in one minute of history. Throws rather than swallowing, so the caller can
-     * decide whether to keep the play for a later attempt.
+     * Registers a play, optionally at the time it actually happened.
+     * [atMs] matters for plays replayed after an outage: without it,
+     * Navidrome timestamps the scrobble on arrival, bunching a week of
+     * offline listening into one minute of history.
      */
     override suspend fun scrobble(songId: String, atMs: Long?, submission: Boolean) {
         val params = mutableListOf("id" to songId, "submission" to submission.toString())
@@ -332,11 +307,9 @@ class SubsonicClient(val config: SubsonicConfig) : MusicServer {
     }
 
     /**
-     * Store the queue server-side, where another client can find it.
-     *
-     * The ids repeat as one parameter each, which is how Subsonic takes a list.
-     * An empty queue would be read as "clear it", so the caller decides that
-     * explicitly rather than arriving here with nothing by accident.
+     * Stores the queue server-side, where another client can find it.
+     * An empty list is read as "clear the queue," so this returns early
+     * rather than clearing it by accident.
      */
     override suspend fun savePlayQueue(
         trackIds: List<String>,
@@ -351,9 +324,8 @@ class SubsonicClient(val config: SubsonicConfig) : MusicServer {
     }
 
     override suspend fun getPlayQueue(): SavedQueue? {
-        // A server that has never been given a queue answers with an error
-        // rather than an empty one, and that is not a failure worth raising to
-        // the caller — it just means there is nothing waiting.
+        // A server with no saved queue answers with an error, not an empty
+        // one. That's not a failure worth raising; nothing is waiting.
         val queue = runCatching { request("getPlayQueue").playQueue }.getOrNull() ?: return null
         val ids = queue.entry.map { it.id }
         if (ids.isEmpty()) return null
@@ -361,11 +333,9 @@ class SubsonicClient(val config: SubsonicConfig) : MusicServer {
     }
 
     /**
-     * Set a song's or album's rating on the server, 0–100.
-     *
-     * Navidrome treats 0 as "remove the rating"; Subsonic's `setRating` takes it
-     * directly, so no separate unrate call is needed. Returns false when the
-     * server refused, so the caller can avoid caching a rating that didn't stick.
+     * Sets a song's or album's rating on the server, 0-100.
+     * Navidrome treats 0 as "remove the rating," which `setRating` handles
+     * directly, with no separate unrate call needed.
      */
     override suspend fun setRating(id: String, rating: Int): Boolean = runCatching {
         request("setRating", listOf("id" to id, "rating" to rating.coerceIn(0, 100).toString()))
@@ -475,13 +445,11 @@ class SubsonicClient(val config: SubsonicConfig) : MusicServer {
 
     /**
      * The album's own name, with Navidrome's appended release comment removed.
-     *
-     * Navidrome sends the MusicBrainz disambiguation both as [AlbumDto.version]
-     * and glued onto the end of the name, so "Alive 2007" arrives as
-     * "Alive 2007 (printed in EU)". Only an exact match for the version string is
-     * stripped — a trailing parenthesis is not evidence by itself, or "Apostrophe
-     * (’)" and "Enter the Wu-Tang (36 Chambers)" would lose part of their real
-     * titles. No version, or a name that doesn't end with it, means no change.
+     * Navidrome sends the MusicBrainz disambiguation both as
+     * [AlbumDto.version] and appended to the name (e.g. "Alive 2007 (printed
+     * in EU)"). Only an exact match for the version string is stripped, so
+     * titles that merely end in a parenthesis (e.g. "Enter the Wu-Tang (36
+     * Chambers)") are left alone.
      */
     private fun albumTitle(raw: String?, version: String?): String {
         val name = raw?.trim().orEmpty().ifEmpty { return "Unknown Album" }
@@ -496,10 +464,9 @@ class SubsonicClient(val config: SubsonicConfig) : MusicServer {
     }
 
     /**
-     * Release date flattened to a sortable YYYYMMDD number, 0 when unknown.
-     * Prefers the *original* release date so a discography reads chronologically
-     * rather than by remaster date; missing month/day sort before the same year's
-     * dated releases.
+     * Release date flattened to a sortable YYYYMMDD number, 0 if unknown.
+     * Prefers the original release date over a remaster date; a missing
+     * month/day sorts before dated releases in the same year.
      */
     private fun AlbumDto.releaseDateKey(): Long {
         val date = originalReleaseDate?.takeIf { it.year != null }
@@ -512,10 +479,10 @@ class SubsonicClient(val config: SubsonicConfig) : MusicServer {
         albumName: String? = null,
         albumArtistName: String? = null,
         /**
-         * The parent album's cover id, where the caller has the album. Preferred
-         * over the song's own: Navidrome hands every file an `mf-` id of its own
-         * that resolves to the same sleeve, and keyed by it the cache held one
-         * copy per song — thousands of files for a few hundred covers.
+         * The parent album's cover id, when the caller has the album.
+         * Preferred over the song's own id, since Navidrome gives every file
+         * its own `mf-` id for the same sleeve, which would otherwise cache
+         * one copy per song.
          */
         albumCoverArt: String? = null,
     ): Track {
@@ -525,9 +492,8 @@ class SubsonicClient(val config: SubsonicConfig) : MusicServer {
             title = title ?: "Unknown Title",
             artist = artist ?: "Unknown Artist",
             album = albumName ?: album ?: "Unknown Album",
-            // The album's answer first — see getAlbumTracks. The track's own
-            // artist is the last resort rather than the second, because it is
-            // the one value here that is known not to be an album artist.
+            // The album's own artist first; see getAlbumTracks. The track's
+            // own artist is the last resort, since it's known not to be an album artist.
             albumArtist = albumArtistName
                 ?: displayAlbumArtist?.takeIf { it.isNotBlank() }
                 ?: albumArtist
@@ -576,17 +542,13 @@ class SubsonicClient(val config: SubsonicConfig) : MusicServer {
 
     companion object {
         /**
-         * Everything the Subsonic API's `format` parameter defines, which a
-         * server is expected to transcode to on demand. A deployment missing a
-         * transcoder for one of these answers with its default instead — that is
-         * a server-side gap, and the honest place to close it is the server.
+         * Every format the Subsonic API's `format` parameter defines. A
+         * server missing a transcoder for one falls back to its own default;
+         * that's a server-side gap, not something to work around here.
          */
         val STREAM_FORMATS: List<StreamFormat> = StreamFormat.entries.toList()
 
-        /**
-         * Default `c=` value, when a source has no [SubsonicConfig.clientName]
-         * of its own. Navidrome registers a Player under whatever this is.
-         */
+        /** Default `c=` value when a source has no [SubsonicConfig.clientName] of its own. */
         private const val CLIENT_NAME = "amp"
         private const val API_VERSION = "1.16.1"
         private const val ALBUM_PAGE_SIZE = 500

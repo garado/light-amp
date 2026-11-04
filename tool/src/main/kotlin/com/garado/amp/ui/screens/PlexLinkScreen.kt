@@ -38,19 +38,13 @@ import com.thelightphone.sdk.SimpleLightScreen
 import kotlinx.coroutines.launch
 
 /**
- * Linking a Plex account by code.
- *
- * The phone shows four characters; the user types them at plex.tv/link on any
- * other device. Nothing is typed on this keyboard, and no password reaches the
- * app. Once the code is claimed, the account's servers are listed and the user
- * picks one — so the server address isn't typed either.
- *
- * There is a way in for a server that was never claimed to an account: see
- * [PlexManualScreen], reached from the row at the bottom.
+ * Links a Plex account by code: the phone shows a code, the user enters it at
+ * plex.tv/link on another device. No password or server address is typed here.
+ * For a server not linked to any account, see [PlexManualScreen].
  */
 class PlexLinkScreen(sealed: SealedLightActivity) : SimpleLightScreen<Unit>(sealed) {
 
-    // While casting, the rocker belongs to the speaker — see handleVolumeKey.
+    // While casting, the rocker belongs to the speaker, see handleVolumeKey.
     override fun onKeyDown(keyCode: Int, event: KeyEvent): Boolean =
         App.playback.handleVolumeKey(keyCode) || super.onKeyDown(keyCode, event)
 
@@ -60,10 +54,7 @@ class PlexLinkScreen(sealed: SealedLightActivity) : SimpleLightScreen<Unit>(seal
         var status by remember { mutableStateOf("Asking Plex for a code…") }
         var servers by remember { mutableStateOf<List<PlexResource>>(emptyList()) }
         var token by remember { mutableStateOf<String?>(null) }
-        // Set once a server is picked, if it turns out to have more than one
-        // music library — asked here rather than after a sync, because syncing
-        // the whole server first only to narrow it afterwards is the long way
-        // round on a machine with several libraries.
+        // Set when the picked server has more than one music library.
         var pending by remember { mutableStateOf<PendingServer?>(null) }
 
         LaunchedEffect(Unit) {
@@ -97,8 +88,6 @@ class PlexLinkScreen(sealed: SealedLightActivity) : SimpleLightScreen<Unit>(seal
                         ) {
                             AppText("plex.tv/link", pxSp(LightType.COPY_PX), align = TextAlign.Center)
                             code?.let {
-                                // The whole point of the screen, so it gets the
-                                // size: read off this and typed somewhere else.
                                 AppText(it, pxSp(122), align = TextAlign.Center)
                             }
                             AppText(status, pxSp(LightType.DETAIL_PX), dim = true, align = TextAlign.Center)
@@ -149,10 +138,8 @@ class PlexLinkScreen(sealed: SealedLightActivity) : SimpleLightScreen<Unit>(seal
     }
 
     /**
-     * Resolve which address answers, then ask what music libraries it has.
-     *
-     * The connection is settled now rather than at play time: a server
-     * advertises several addresses and only some of them work from here.
+     * Resolves which of the server's advertised addresses is reachable, then
+     * reads its music libraries.
      */
     private suspend fun prepare(server: PlexResource, accountToken: String): PendingServer? {
         val uri = PlexAccount.reachable(server, accountToken) ?: return null
@@ -160,13 +147,9 @@ class PlexLinkScreen(sealed: SealedLightActivity) : SimpleLightScreen<Unit>(seal
             name = server.name,
             uri = uri,
             token = server.accessToken ?: accountToken,
-            // An account already knows the server's id; only the typed-in path
-            // has to go and ask for it.
             machineIdentifier = server.clientIdentifier,
         ) ?: return null
-        // Keep the addresses that didn't win too: the one that answers at home
-        // is usually the LAN address, which is unreachable from anywhere else.
-        // See MusicSource.connections.
+        // Keep the non-winning addresses too; see MusicSource.connections.
         return pending.copy(
             source = pending.source.copy(connections = PlexAccount.candidates(server)),
         )
@@ -174,11 +157,8 @@ class PlexLinkScreen(sealed: SealedLightActivity) : SimpleLightScreen<Unit>(seal
 
     private fun save(source: MusicSource) {
         App.scope.launch {
-            // Re-linking an already-known server (by Plex's own machine id)
-            // updates that source in place rather than adding a second one —
-            // see the note on AppSettings.saveSource — so the id actually made
-            // active has to be whatever saveSource settled on, not the fresh
-            // one this screen minted.
+            // Re-linking an already-known server (by machine id) updates it in
+            // place; see AppSettings.saveSource. Activate whatever id it returns.
             val id = App.settings.saveSource(source)
             App.settings.setActiveSource(id)
         }
@@ -189,13 +169,7 @@ class PlexLinkScreen(sealed: SealedLightActivity) : SimpleLightScreen<Unit>(seal
 /** A server we can reach, and the music libraries on it. */
 data class PendingServer(val source: MusicSource, val sections: List<MusicFolder>)
 
-/**
- * Everything about a server that has to be settled before it becomes a source:
- * that it answers, what it calls itself, and what music libraries it holds.
- *
- * Null when the address and token don't get us in — better found here than by a
- * sync that fails after the source is already saved.
- */
+/** Validates that a server is reachable and lists its music libraries. Returns null if not. */
 suspend fun inspectPlexServer(
     name: String,
     uri: String,
@@ -204,8 +178,7 @@ suspend fun inspectPlexServer(
 ): PendingServer? {
     val client = PlexClient(uri, token, machineIdentifier.orEmpty())
     try {
-        // Without the machine id nothing can be added to a playlist, so a server
-        // that won't tell us who it is isn't usable as a source.
+        // The machine id is required: without it, tracks can't be added to a playlist.
         val identity = machineIdentifier ?: client.identity() ?: return null
         val sections = runCatching { client.getMusicFolders() }.getOrNull() ?: return null
         val source = MusicSource(
@@ -215,9 +188,6 @@ suspend fun inspectPlexServer(
             baseUrl = uri,
             token = token,
             machineIdentifier = identity,
-            // Remembered on the source, so the Sources page can offer the same
-            // switch a Navidrome's music folders get — without waiting for a
-            // sync to discover what we already know here.
             libraries = sections.map { SourceLibrary(it.id, it.name) },
         )
         return PendingServer(source, sections)
@@ -229,22 +199,18 @@ suspend fun inspectPlexServer(
 /** The fallback: a server address and a token, typed in. */
 class PlexManualScreen(sealed: SealedLightActivity) : SimpleLightScreen<Unit>(sealed) {
 
-    // While casting, the rocker belongs to the speaker — see handleVolumeKey.
+    // While casting, the rocker belongs to the speaker, see handleVolumeKey.
     override fun onKeyDown(keyCode: Int, event: KeyEvent): Boolean =
         App.playback.handleVolumeKey(keyCode) || super.onKeyDown(keyCode, event)
 
-    // On the screen rather than in the composition, because opening the editor
-    // for a field composes a new top-of-stack screen and tears this one's
-    // composition down — see the same note in ServerScreen.
+    // Held on the screen, not in composition state: opening a field's editor pushes a
+    // new screen and tears this composition down. See the same note in ServerScreen.
     private var name by mutableStateOf("")
     private var address by mutableStateOf("")
     private var token by mutableStateOf("")
     private var status by mutableStateOf<String?>(null)
-    // Set once the server answers and turns out to hold more than one music
-    // library, exactly as on the account path.
     private var pending by mutableStateOf<PendingServer?>(null)
-    // Each check mints a fresh source id, so two taps while the first is still
-    // in flight would add the same server twice — see the note in ServerScreen.
+    // Guards against a second tap re-checking (and re-adding) the server while one check is in flight.
     private var checking by mutableStateOf(false)
 
     @Composable
@@ -289,9 +255,6 @@ class PlexManualScreen(sealed: SealedLightActivity) : SimpleLightScreen<Unit>(se
                         checking = true
                         status = "Checking…"
                         App.scope.launch {
-                            // Proven before it is saved: a source that can't be
-                            // reached would otherwise sit there failing to sync
-                            // with nothing to say why.
                             val next = inspectPlexServer(
                                 name = name.trim(),
                                 uri = address.trim().trimEnd('/'),
@@ -319,10 +282,8 @@ class PlexManualScreen(sealed: SealedLightActivity) : SimpleLightScreen<Unit>(se
 
     private fun save(source: MusicSource) {
         App.scope.launch {
-            // See the note in PlexLinkScreen.save: the id that ends up active
-            // is whichever one saveSource kept, which may be an existing
-            // source's if this same server (by machineIdentifier) was already
-            // linked under a different address.
+            // See PlexLinkScreen.save: saveSource may resolve to an existing source's id
+            // if this server was already linked under a different address.
             val id = App.settings.saveSource(source)
             App.settings.setActiveSource(id)
         }

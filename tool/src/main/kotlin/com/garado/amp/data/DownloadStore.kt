@@ -9,17 +9,10 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
 /**
- * The on-disk half of offline playback: downloaded audio under the tool's private
- * files directory, plus the storage arithmetic the settings UI needs.
- *
- * A folder per source, because two servers can hand out the same track id for
- * different music — and because removing a source has to be able to take its
- * audio with it without touching anyone else's. Every call names the source it
- * means: the downloader fetches for every source at once, whichever is being
- * browsed, so there is no "current" folder for it to default to.
- *
- * Plain [File] work — the plugin sandbox allows `java.io` and `android.os.StatFs`,
- * so none of this needs SDK support.
+ * The on-disk half of offline playback: downloaded audio under the tool's
+ * private files directory, plus the storage arithmetic the settings UI needs.
+ * One folder per source, so removing a source can take its audio with it
+ * without touching anyone else's.
  */
 class DownloadStore(private val filesDir: File) {
 
@@ -28,32 +21,20 @@ class DownloadStore(private val filesDir: File) {
     private fun rootFor(sourceId: String): File =
         File(downloadsDir, sourceId).apply { mkdirs() }
 
-    /** Every source's folder — used by the sweep and by "delete everything". */
+    /** Every source's folder, used by the sweep and by "delete everything". */
     private fun allRoots(): List<File> =
         downloadsDir.listFiles().orEmpty().filter { it.isDirectory }
 
     init {
-        // Sweep partials left by a download the process didn't live to finish;
-        // they're never resumable and would otherwise count against the budget.
-        // Filtered in Kotlin rather than via a File(name)Filter lambda, whose SAM
-        // overload resolution is easy to get silently wrong.
-        //
-        // Legacy layout: downloads used to sit directly in the folder that now
-        // holds one directory per source. Anything left there is moved into the
-        // first source's folder by [adoptLegacyFiles].
+        // Sweep partials left by a download the process didn't live to
+        // finish; they're never resumable and would count against the budget.
         val downloads = downloadsDir.apply { mkdirs() }
         (downloads.listFiles().orEmpty().toList() + allRoots().flatMap { it.listFiles().orEmpty().toList() })
             .filter { it.isFile && it.name.endsWith(PART_SUFFIX) }
             .forEach { it.delete() }
     }
 
-    /**
-     * Move pre-sources downloads into [sourceId]'s folder.
-     *
-     * Called once for the source that inherits the old single-server setup; the
-     * files are the durable artefact, and re-fetching gigabytes because the
-     * layout changed underneath them is not an acceptable upgrade.
-     */
+    /** Move pre-sources downloads into [sourceId]'s folder, for the source that inherits the old single-server setup. */
     fun adoptLegacyFiles(sourceId: String) {
         val target = rootFor(sourceId)
         downloadsDir.listFiles().orEmpty()
@@ -62,12 +43,9 @@ class DownloadStore(private val filesDir: File) {
     }
 
     /**
-     * Everything [sourceId] has on disk, as (trackId, format) pairs.
-     *
-     * The download index lives in Room, and the SDK drops every table whenever the
-     * schema version moves — so a bump would otherwise strand gigabytes of audio
-     * as unreferenced files and re-fetch the lot. The files are named
-     * `<trackId>.<suffix>`, which is enough to rebuild the index from.
+     * Everything [sourceId] has on disk, as (trackId, format) pairs. Files
+     * are named `<trackId>.<suffix>`, which is enough to rebuild the Room
+     * index after a schema bump drops it.
      */
     fun onDisk(sourceId: String): List<Pair<String, StreamFormat>> =
         rootFor(sourceId).listFiles().orEmpty().mapNotNull { file ->
@@ -99,14 +77,11 @@ class DownloadStore(private val filesDir: File) {
             try {
                 val startedMs = System.currentTimeMillis()
                 val connection = URL(url).openConnection()
-                // Without these a half-open connection parks the worker forever,
-                // which reads as "downloads have stopped" rather than as an error.
+                // Without these a half-open connection parks the worker
+                // forever instead of failing visibly.
                 connection.connectTimeout = CONNECT_TIMEOUT_MS
                 connection.readTimeout = READ_TIMEOUT_MS
                 connection.getInputStream().use { input ->
-                    // 8 KiB (copyTo's default) into an unbuffered FileOutputStream
-                    // is a write syscall every 8 KiB; on this hardware that costs
-                    // more than the transfer does.
                     BufferedOutputStream(partial.outputStream(), BUFFER_BYTES).use { output ->
                         input.copyTo(output, BUFFER_BYTES)
                     }
@@ -131,7 +106,7 @@ class DownloadStore(private val filesDir: File) {
             } catch (e: Exception) {
                 Log.w(TAG, "download failed after ${partial.length()} bytes for $trackId", e)
                 partial.delete()
-                // No `javaClass` here — the plugin sandbox forbids reflection.
+                // No `javaClass` here: the plugin sandbox forbids reflection.
                 lastError = e.message ?: "Download failed"
                 null
             }
@@ -146,7 +121,7 @@ class DownloadStore(private val filesDir: File) {
         File(rootFor(sourceId), fileName).delete()
     }
 
-    /** Throw away one source's audio entirely — see App.forgetSource. */
+    /** Throw away one source's audio entirely; see App.forgetSource. */
     fun deleteSource(id: String) {
         File(downloadsDir, id).deleteRecursively()
     }
@@ -156,12 +131,10 @@ class DownloadStore(private val filesDir: File) {
         runCatching { StatFs(downloadsDir.apply { mkdirs() }.absolutePath).availableBytes }.getOrDefault(0L)
 
     /**
-     * Everything the tool has downloaded, across every source, read off the disk.
-     *
-     * The disk rather than the downloads table: the table lives in the active
-     * source's database and can only ever answer for that one, where the budget
-     * this is weighed against covers the whole phone. Files are the truth here
-     * anyway — a row without its file is not using any storage.
+     * Everything the tool has downloaded, across every source, read off the
+     * disk rather than the downloads table, since that table only covers the
+     * active source while the budget this is weighed against covers the
+     * whole phone.
      */
     fun usedBytesEverywhere(): Long =
         allRoots().sumOf { root ->
@@ -243,21 +216,9 @@ class DownloadStore(private val filesDir: File) {
     }
 
     /**
-     * The largest limit the user may choose.
-     *
-     * The SDK imposes no quota of its own — downloads go to ordinary app-private
-     * storage — so the real constraint is leaving the phone usable: a fraction
-     * of what the tool could occupy, with an absolute ceiling on top.
-     *
-     * What it *could* occupy is the free space **plus what it is already
-     * holding**, because that space is its own — filling it is what put it
-     * there. Measured against free space alone, a phone with 56GB downloaded
-     * and 10GB spare offered a maximum of 7GB: an invitation to delete almost
-     * everything, on a screen that never mentions deleting anything.
-     *
-     * Never below what is already downloaded, either. A cap under the current
-     * usage cannot be shown as the state the user is in, and choosing it would
-     * silently mean "throw away the difference".
+     * The largest limit the user may choose: a fraction of free space plus
+     * what is already downloaded (that space is already the tool's own),
+     * capped at an absolute ceiling, and never below current usage.
      */
     fun maxSelectableBytes(): Long {
         val used = usedBytesEverywhere()
@@ -273,14 +234,10 @@ class DownloadStore(private val filesDir: File) {
         private const val CONNECT_TIMEOUT_MS = 15_000
         private const val READ_TIMEOUT_MS = 30_000
         private const val PART_SUFFIX = ".part"
-        // A real track is never this small; a transcode that failed server-side
-        // (e.g. ffmpeg choking on a file) can still come back HTTP 200 with a
-        // tiny body, which used to get saved as a "successful" download.
+        // A real track is never this small; a server-side transcode failure
+        // can still return HTTP 200 with a tiny body.
         private const val MIN_PLAUSIBLE_BYTES = 8 * 1024
-        // 64 GB is reachable on the LP3's 128 GB of storage only if we're willing
-        // to claim more than half of what's free, so the share goes up with the
-        // ceiling; a quarter of free space still stays behind for the OS and the
-        // rest of the phone.
+        // A quarter of free space stays behind for the OS and the rest of the phone.
         private const val FREE_SPACE_SHARE = 0.75
         private const val ABSOLUTE_CEILING = 64L * 1024 * 1024 * 1024
     }
@@ -292,8 +249,8 @@ val StreamFormat.suffix: String
         StreamFormat.MP3 -> "mp3"
         StreamFormat.OPUS -> "opus"
         StreamFormat.FLAC -> "flac"
-        // "raw" is whatever the server holds; the container is unknown up front,
-        // and ExoPlayer sniffs content rather than trusting the extension.
+        // "raw" is whatever the server holds; ExoPlayer sniffs content
+        // rather than trusting the extension.
         StreamFormat.RAW -> "audio"
     }
 
@@ -306,11 +263,7 @@ val StreamFormat.qualityRank: Int
         StreamFormat.RAW -> 4
     }
 
-/** "1.4 GB", "820 MB" — sizes as the settings screens show them. */
-/**
- * Always in GB, for the used/allowed pair on the Downloads page — mixing "740 MB"
- * against "50.3 GB" makes the two halves hard to compare at a glance.
- */
+/** Always in GB, for the used/allowed pair on the Downloads page, so the two are easy to compare. */
 fun formatGb(bytes: Long): String {
     val gb = bytes / 1024.0 / 1024.0 / 1024.0
     return if (gb >= 100) "${gb.toInt()} GB" else String.format("%.1f GB", gb)

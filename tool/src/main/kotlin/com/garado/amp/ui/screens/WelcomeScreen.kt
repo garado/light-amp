@@ -22,16 +22,9 @@ import com.garado.amp.ui.PlayerTheme
 import com.garado.amp.ui.components.appClickable
 
 /**
- * First run: pick where the music comes from.
- *
- * The three kinds are offered as equals. An earlier version put a Subsonic login
- * form here with the phone's own music as a footnote and no mention of Plex at
- * all, which quietly told anyone who came for the other two that they'd
- * installed the wrong app. None of the three is the default.
- *
- * Each choice hands off to the same screen used to add that kind of source later
- * from Settings, so there is one setup flow per kind rather than two that can
- * drift apart.
+ * First run: pick where the music comes from. The three source kinds are offered
+ * as equals, none the default. Each choice hands off to the same screen used to
+ * add that kind of source later from Settings.
  */
 @Composable
 fun WelcomeContent(
@@ -66,13 +59,8 @@ fun WelcomeContent(
 
             Spacer(Modifier.height(px(60)))
 
-            // Named because "Subsonic" is the protocol, not the thing most
-            // people run — someone with a Navidrome server needs telling that
-            // the first option is theirs.
-            //
-            // Bandcamp leads the list: it is the only one of them that needs
-            // nothing self-hosted, so it is the name most likely to tell a
-            // reader that this app is for them after all.
+            // "Subsonic" is the protocol name, not the server most people run, so this
+            // spells out which servers it covers (e.g. Navidrome).
             AppText(
                 "Subsonic covers Bandcamp, Navidrome, Airsonic and Ampache.",
                 pxSp(LightType.DETAIL_PX),
@@ -94,9 +82,8 @@ private fun SourceChoice(label: String, onClick: () -> Unit) {
             .padding(vertical = px(40)),
         contentAlignment = Alignment.Center,
     ) {
-        // Light's Button tracking at its Button size — but at the Regular
-        // weight: the style asks for Medium, which the phone lacks, and
-        // AppText would round it up to Bold, which shouts.
+        // Forces Regular weight: the Button style asks for Medium, which the phone lacks,
+        // and AppText would otherwise round it up to Bold.
         AppText(
             label,
             pxSp(LightType.COPY_PX),

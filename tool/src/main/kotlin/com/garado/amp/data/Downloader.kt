@@ -24,11 +24,7 @@ data class DownloadProgress(
     val pending: Int = 0,
     val completed: Int = 0,
     val currentTitle: String? = null,
-    /**
-     * Which server the current track is coming from, by name — for the
-     * Downloads page, where with several servers queued the title alone
-     * doesn't say whose music is moving.
-     */
+    /** Which server the current track is coming from, by name, for the Downloads page. */
     val currentSource: String? = null,
     /** Set when the size limit stopped the queue rather than it finishing. */
     val limitReached: Boolean = false,
@@ -38,71 +34,52 @@ data class DownloadProgress(
 }
 
 /**
- * Downloads tracks for offline playback and keeps the download index in step with
- * the files on disk.
+ * Downloads tracks for offline playback and keeps the download index in step
+ * with the files on disk.
  *
- * **Every source at once.** The queue holds tracks from every configured server,
- * each tagged with the source it came from, and the worker resolves the client,
- * the tables, the folder and the format *per track* from that tag. Which source
- * is being browsed is a browsing choice and has no bearing here: a Plex library
- * set to download everything keeps arriving while you listen to Navidrome or to
- * the phone's own files. What holds downloads back is the data mode, the user's
- * own pause, and — per source, never for everyone — a server that has stopped
- * answering or a library mid-sync. See [DownloadQueue] for the order.
+ * Queues tracks from every configured server at once, each tagged with its
+ * source; the worker resolves the client, tables, folder, and format per
+ * track from that tag rather than from whichever source is being browsed.
+ * Downloads are held back per source by data mode, user pause, server
+ * unreachability, or a mid-sync library; see [DownloadQueue] for the order.
  *
- * One worker at a time, deliberately — and measured, not assumed. Navidrome
- * transcodes on demand, and that encode is the ceiling: against the real library a
- * single stream and three concurrent streams both delivered **0.5 MB/s in total**,
- * except that with three nothing finished inside 92s while one worker completed
- * four tracks. Concurrency buys no bandwidth here and costs completion latency, so
- * don't reach for it again without re-measuring the aggregate. (Bursts of ~4 MB/s
- * do happen — those are tracks already sitting in the server's transcode cache.)
- * That measurement was one server; two servers would be two transcoders, but
- * also one phone's downlink, so the same rule stands until someone measures it.
+ * Runs one worker at a time: measured against a real Navidrome server,
+ * concurrent streams did not add bandwidth (transcoding is the bottleneck)
+ * and increased completion latency instead.
  */
 class Downloader(
     /**
-     * The source being browsed — for the calls the library screens make about
-     * the tracks on them: [enqueue] without a source, [remove], [cachedLyrics].
-     * The worker never reads it. Every queued track names its own source, and
-     * resolving anything about a transfer through "the active source" is
-     * exactly the mistake that sent Navidrome ids to Plex.
+     * The source being browsed, for calls the library screens make about the
+     * tracks on them: [enqueue] without a source, [remove], [cachedLyrics].
+     * The worker never reads it; every queued track names its own source.
      */
     private val activeSource: () -> MusicSource,
-    /** A source's tables — App.databaseFor. */
+    /** A source's tables; App.databaseFor. */
     private val daoFor: (MusicSource) -> LibraryDao,
-    /** A source's client — App.clientFor. Null for the phone's own music. */
+    /** A source's client; App.clientFor. Null for the phone's own music. */
     private val clientFor: (MusicSource) -> MusicServer?,
     private val store: DownloadStore,
     private val settings: AppSettings,
     private val scope: CoroutineScope,
     /** Used only to hold the process at foreground priority while draining. */
     private val lightContext: SealedLightContext,
-    /**
-     * Whether real bytes may move right now — see App.heavyDataAllowed.
-     *
-     * Checked between tracks, like every other pause: the queue keeps its
-     * order and simply waits. This is the gate that was missing when a queue
-     * built at home drained over cellular the moment the server still
-     * answered — reachability was the only thing ever consulted.
-     */
+    /** Whether real bytes may move right now; see App.heavyDataAllowed. Checked between tracks. */
     private val heavyDataAllowed: () -> Boolean,
 ) {
     private val _progress = MutableStateFlow(DownloadProgress())
     val progress: StateFlow<DownloadProgress> = _progress
 
-    /** Everything waiting, every source's — guarded by [lock]. */
+    /** Everything waiting, from every source; guarded by [lock]. */
     private val queue = DownloadQueue()
     private val lock = Mutex()
     private var worker: Job? = null
 
     /**
-     * The entry being transferred right now, and one that a [cancelSource]
-     * has disowned mid-transfer. The transfer itself is blocking I/O and isn't
-     * interrupted; instead, whatever it produces is thrown away when it ends,
-     * and it is neither recorded nor requeued. Cheaper than cancelling the
-     * worker, which would also drop the foreground service out from under the
-     * other sources' downloads.
+     * The entry being transferred right now, and one that [cancelSource] has
+     * disowned mid-transfer. The transfer is blocking I/O and isn't
+     * interrupted; its result is discarded when it ends instead, rather than
+     * cancelling the worker and dropping the foreground service for every
+     * other source.
      */
     @Volatile
     private var inFlight: DownloadQueue.Key? = null
@@ -111,13 +88,9 @@ class Downloader(
     private var abandoned: DownloadQueue.Key? = null
 
     /**
-     * The source whose library is syncing, if one is.
-     *
-     * A sync is hundreds of sequential `getAlbum` calls, and the same server is
-     * transcoding every download on demand — so letting both run means the sync
-     * queues behind ffmpeg and crawls. Downloads are the interruptible half of
-     * that pair, so *that server's* yield. The others have nothing to do with it
-     * and carry on. Only the browsed source ever syncs, so one id is enough.
+     * The source whose library is syncing, if one is. That source's downloads
+     * yield to the sync, since both compete for the same server's transcoder.
+     * Only the browsed source ever syncs, so one id is enough.
      */
     @Volatile
     private var syncingSourceId: String? = null
@@ -127,18 +100,9 @@ class Downloader(
     private var userPaused = false
 
     /**
-     * When to try each source again after its server stopped answering — not
-     * *whether* to.
-     *
-     * This used to be a boolean latched on the first failed transfer and
-     * cleared only by a successful library sync. A single blip therefore parked
-     * downloads indefinitely: the queue sat on "Waiting for the server" on
-     * perfectly good wifi, and nothing about downloading could get it going
-     * again, because only syncing could clear the flag. A deadline retries by
-     * itself and needs nobody's permission.
-     *
-     * Per source, because a server that is down is one server: its tracks wait,
-     * everyone else's are picked instead — see [eligible].
+     * When to try each source again after its server stopped answering, as a
+     * deadline rather than a latched flag, so retries happen on their own. Per
+     * source, so one down server doesn't hold up the others; see [eligible].
      */
     private val retryAtBySource = ConcurrentHashMap<String, Long>()
 
@@ -169,42 +133,27 @@ class Downloader(
 
     // --- Public API ----------------------------------------------------------
 
-    /**
-     * Queue [tracks] from the source being browsed — what the library screens
-     * call, about the rows on them.
-     */
+    /** Queue [tracks] from the source being browsed; what the library screens call. */
     fun enqueue(tracks: List<Track>, manual: Boolean = true) =
         enqueue(activeSource(), tracks, manual)
 
     /**
-     * Queue [tracks] of [source] for download.
-     *
-     * [manual] is what the user asked for by name — an album, a playlist, a
-     * selection — and jumps ahead of anything an offline mode queued. Only
-     * [applyAutoMode] passes false.
+     * Queue [tracks] of [source] for download. [manual] marks a request the
+     * user asked for by name, which jumps ahead of anything an offline mode
+     * queued; only [applyAutoMode] passes false.
      */
     fun enqueue(source: MusicSource, tracks: List<Track>, manual: Boolean = true) {
         if (tracks.isEmpty()) return
-        // Nothing to fetch for the phone's own music: the files are already
-        // here, and this app has no business asking anyone for them.
         if (!source.supportsDownloads) return
-        // Asking for something by hand is also asking to try now: whatever the
-        // last failure decided about waiting, the person tapping Download has
-        // better information about whether the server is up than we do.
+        // A manual request is also a request to try now, overriding any
+        // current back-off.
         if (manual) clearBackOff(source.id)
         scope.launch {
-            // One query for the whole set. Asking per track meant an automatic mode
-            // over a ten-thousand-track library fired ten thousand point selects,
-            // and it did so while holding the lock.
+            // One query for the whole set, rather than one per track.
             val already = daoFor(source).downloadedIds().toHashSet()
             lock.withLock {
                 tracks.forEach { track ->
                     if (track.id in already) return@forEach
-                    // A file on this phone is not something to fetch a copy of.
-                    // Belt as well as braces — the UI hides the action, and
-                    // App.topUpDownloads never offers these — because a stray
-                    // enqueue here would ask the server for an id it has never
-                    // heard of, once per track.
                     if (LocalLibrary.isLocal(track.id)) return@forEach
                     queue.add(QueuedDownload(source.id, track), manual)
                 }
@@ -213,9 +162,8 @@ class Downloader(
                     limitReached = false,
                     error = null,
                 )
-                // Started while holding the lock: checking liveness from two
-                // enqueue coroutines otherwise lets both top the pool up and the
-                // same track gets fetched twice.
+                // Started while holding the lock, so two concurrent enqueue
+                // calls can't both start a worker for the same track.
                 startWorkerLocked()
             }
         }
@@ -229,16 +177,8 @@ class Downloader(
         syncingSourceId = sourceId
     }
 
-    /**
-     * Hold one source's downloads while its server is unreachable.
-     *
-     * Without this the worker walks the whole queue at full speed, failing every
-     * track in turn — which empties a ten-thousand-track queue into the error
-     * counter in a few seconds and leaves nothing to resume.
-     */
+    /** Hold one source's downloads while its server is unreachable. */
     fun setOffline(sourceId: String, value: Boolean) {
-        // A reachability signal is a hint, not a verdict: it schedules the next
-        // attempt, and a success clears it. See retryAtBySource.
         if (value) backOff(sourceId) else clearBackOff(sourceId)
     }
 
@@ -262,10 +202,9 @@ class Downloader(
     }
 
     /**
-     * Drop everything waiting for one source — its Delete Downloads, or the
-     * source itself going. The other sources' downloads are not touched, and
-     * a transfer of this source's already under way is disowned rather than
-     * interrupted: see [abandoned].
+     * Drop everything waiting for one source: its Delete Downloads, or the
+     * source itself going. A transfer already under way is disowned rather
+     * than interrupted; see [abandoned].
      */
     suspend fun cancelSource(sourceId: String) {
         lock.withLock {
@@ -304,12 +243,9 @@ class Downloader(
         daoFor(activeSource()).download(trackId)?.lyrics
 
     /**
-     * Re-index audio that is on disk but missing from the database, for every
-     * source.
-     *
-     * Room drops all tables on a schema bump (the SDK can't register migrations),
-     * which would otherwise make the app re-download everything it already has.
-     * Files are the durable artefact; the index is derived from them.
+     * Re-index audio that is on disk but missing from the database, for
+     * every source. Needed because a schema bump drops all tables; files on
+     * disk are the durable record.
      */
     suspend fun reindexFromDisk() {
         settings.sources.first()
@@ -322,8 +258,8 @@ class Downloader(
         val known = dao.downloadedIds().toHashSet()
         val missing = store.onDisk(source.id).filter { (id, _) -> id !in known }
         if (missing.isEmpty()) return
-        // The file name carries only the track id, so the album comes from the
-        // library — which on a rebuilt cache is usually empty at this point.
+        // The file name carries only the track id; the album is resolved from
+        // the library, which may still be empty here.
         // [LibraryDao.backfillDownloadAlbums] finishes the job after the sync.
         val albums = dao.tracksByIds(missing.map { it.first })
             .associate { it.id to it.albumId }
@@ -346,22 +282,11 @@ class Downloader(
 
     /**
      * Fetch the words for the browsed source's downloads that have none.
-     *
-     * [reindexFromDisk] can rebuild a download row from the file on disk, but the
-     * lyrics were only ever in the database — so a schema bump leaves an offline
-     * track with its audio and no words, and nothing else would ever fetch them:
-     * the track counts as downloaded, so it is never queued again. This is the
-     * one part of a wiped table the disk cannot answer for.
-     *
-     * A track whose words are nowhere stores a blank rather than staying null, so
-     * it is asked about once and not on every launch afterwards. Blank parses to
-     * nothing downstream, which is what an absent lyric already did — see
-     * LyricsRepository.resolve.
-     *
-     * Capped per run: a large offline library would otherwise be thousands of
-     * requests in one go, and there is no hurry — what is left comes back on the
-     * next sync. Runs after a sync, and only the browsed source syncs, so it is
-     * that source's downloads it repairs.
+     * Lyrics live only in the database, so a schema bump leaves downloaded
+     * audio with no words that nothing else would ever refetch. A track with
+     * no lyrics available anywhere stores a blank rather than null, so it is
+     * asked about once, not on every launch. Capped per run; what's left
+     * comes back on the next sync.
      */
     suspend fun refillMissingLyrics() {
         val source = activeSource()
@@ -380,8 +305,8 @@ class Downloader(
     }
 
     /**
-     * Queue whatever [source]'s [OfflineMode] implies. Safe to call repeatedly —
-     * already-downloaded tracks are skipped, so this just tops up.
+     * Queue whatever [source]'s [OfflineMode] implies. Safe to call
+     * repeatedly; already-downloaded tracks are skipped.
      */
     suspend fun applyAutoMode(
         source: MusicSource,
@@ -391,8 +316,8 @@ class Downloader(
         playlistTracks: List<Track>,
         likedArtistNames: Set<String>,
     ) {
-        // Order is priority: the queue drains front to back and the size limit cuts
-        // it off wherever it runs out, so whatever matters most has to come first.
+        // Order is priority: the queue drains front to back and the size
+        // limit cuts it off wherever it runs out.
         val favourites = likedTracks +
             playlistTracks +
             allTracks.filter { it.albumId in likedAlbumIds } +
@@ -402,8 +327,6 @@ class Downloader(
         val wanted = when (source.offlineMode) {
             OfflineMode.MANUAL -> return
             OfflineMode.FAVORITES -> favourites
-            // Everything, but favourites first so they are never the tracks that
-            // lose out when the budget runs dry.
             OfflineMode.ALL -> favourites + allTracks
         }
         enqueue(source, wanted.distinctBy { it.id }, manual = false)
@@ -412,7 +335,7 @@ class Downloader(
     private companion object {
         const val PAUSE_POLL_MS = 1_000L
 
-        /** How many lyric refills one pass will attempt — see refillMissingLyrics. */
+        /** How many lyric refills one pass will attempt; see refillMissingLyrics. */
         private const val LYRICS_REFILL_PER_RUN = 200
 
         /** First retry after a failed transfer; doubles up to [RETRY_MAX_MS]. */
@@ -432,20 +355,15 @@ class Downloader(
                 // Cancelled by cancelAll(); progress was already reset there.
             } finally {
                 inFlight = null
-                // Runs on cancellation too, so the phone never keeps a foreground
-                // service alive for a queue that has stopped.
                 LightTransferService.stop(lightContext)
             }
         }
     }
 
     /**
-     * Lyrics to store beside a downloaded track.
-     *
-     * With karaoke on, timed lyrics are the point — so when the server only has
-     * plain text, lrclib is asked as well, exactly as the player does when
-     * online. Without it, whatever the server has is enough and the extra
-     * request isn't worth making on every track in the library.
+     * Lyrics to store beside a downloaded track. With karaoke on, lrclib is
+     * also asked when the server only has plain text, matching what the
+     * player does online.
      */
     private suspend fun fetchLyrics(
         client: MusicServer,
@@ -463,7 +381,7 @@ class Downloader(
         }
     }
 
-    /** Why nothing is moving although something is queued — see [eligible]. */
+    /** Why nothing is moving although something is queued; see [eligible]. */
     private fun heldReason(sourceIds: Set<String>): String =
         if (sourceIds.isNotEmpty() && sourceIds.all { waiting(it) }) {
             "Waiting for the server"
@@ -472,20 +390,17 @@ class Downloader(
         }
 
     private suspend fun drain() {
-        // Held around actual transfers rather than around the worker: starting the
-        // service for a queue that turns out to be empty means starting and
-        // stopping it within milliseconds, and Android kills the process when a
-        // foreground service is torn down before it ever reached the foreground.
+        // Held around actual transfers rather than around the worker, since
+        // starting the foreground service for a queue that turns out to be
+        // empty can get the process killed before it reaches the foreground.
         var holdingService = false
         val wantKaraoke = settings.karaokeLyrics.first()
-        // One budget for the tool, not one per source — see AppSettings.downloadLimit.
         val limit = settings.downloadLimit.first()
         var completed = 0
 
         while (true) {
-            // The pauses that hold everyone: the user's, and the data mode's.
-            // Checked between tracks, so a sync starting mid-file lets that file
-            // finish rather than abandoning the bytes already fetched.
+            // Checked between tracks so a sync starting mid-file lets that
+            // file finish rather than abandoning the bytes already fetched.
             while (userPaused || !heavyDataAllowed()) {
                 _progress.value = _progress.value.copy(
                     currentTitle = if (userPaused) "Paused" else "Waiting for Wi-Fi",
@@ -494,17 +409,14 @@ class Downloader(
                 delay(PAUSE_POLL_MS)
             }
 
-            // Manual lane first, always, of whichever source can be asked right
-            // now — see [DownloadQueue.next]. Which lane it came from travels
-            // with it, so a re-queue goes back where it belongs.
+            // Manual lane first, of whichever source can be asked right now;
+            // see [DownloadQueue.next].
             val (picked, held) = lock.withLock {
                 val next = queue.next(::eligible)
                 next to (if (next == null) queue.sourceIds() else emptySet())
             }
             if (picked == null) {
                 if (held.isEmpty()) break
-                // Something is queued, and every source it belongs to is held:
-                // on its server to answer again, or for its sync to finish.
                 _progress.value = _progress.value.copy(
                     currentTitle = heldReason(held),
                     currentSource = null,
@@ -523,15 +435,8 @@ class Downloader(
                 continue
             }
 
-            // Re-checked every track: the budget moves as files land, and the
-            // user can lower the limit while a queue is running.
-            //
-            // Measured across every source, because the budget covers all of
-            // them. Against this source's table alone, two sources could each
-            // fill to the limit and take twice it between them — which is the
-            // arithmetic that made the limit worth moving out of the sources in
-            // the first place. Read off the disk for the same reason: a table
-            // can only ever answer for its own source.
+            // Measured across every source, since the budget covers all of
+            // them combined, not any one source's usage.
             if (store.usedBytesEverywhere() >= limit) {
                 lock.withLock { queue.clear() }
                 _progress.value = _progress.value.copy(
@@ -552,25 +457,19 @@ class Downloader(
 
             val client = clientFor(source)
             if (client == null) {
-                // Nothing to ask — a record with no server behind it. Back to
-                // the front of its own lane, and its source waits its turn like
-                // one that isn't answering, so the others aren't held up by it.
                 _progress.value = _progress.value.copy(error = "Not connected")
                 lock.withLock { queue.requeueFront(picked) }
                 backOff(source.id)
                 continue
             }
 
-            // This source's own choice, not the browsed one's: the downloads
-            // belong to that library, and a server that can only serve one
-            // format shouldn't dictate what the others are fetched as.
             val format = source.downloadFormat
             val dao = daoFor(source)
 
             if (!holdingService) {
-                // Without this the process drops to the cached bucket the moment the
-                // user leaves the app and transfers are throttled about ninefold —
-                // see LightTransferService for the measurements.
+                // Without this the process drops to the cached bucket once
+                // the user leaves the app, throttling transfers; see
+                // LightTransferService for the measurements.
                 LightTransferService.start(lightContext, "Syncing your library for offline")
                 holdingService = true
             }
@@ -581,9 +480,8 @@ class Downloader(
                 inFlight = null
             }
 
-            // Disowned while it was transferring — its source's downloads were
-            // deleted, or the source itself was. Whatever landed goes; nothing
-            // is recorded, nothing requeued, no strike, no back-off.
+            // Disowned while transferring: its source's downloads were
+            // deleted, or the source itself was. Discard the result.
             val disowned = lock.withLock {
                 (abandoned == entry.key).also { if (it) abandoned = null }
             }
@@ -593,20 +491,14 @@ class Downloader(
             }
 
             if (file != null) {
-                // An mp3 that came down as a stream has no index, and every
-                // player that opens it has to guess its length — see
-                // Mp3VbrIndex. Written now, before anything records the size.
+                // An mp3 streamed down has no VBR index, so every player that
+                // opens it has to guess its length; see Mp3VbrIndex.
                 if (format == StreamFormat.MP3) {
                     runCatching { Mp3VbrIndex.index(file) }
                         .onSuccess { if (it is Mp3VbrIndex.Outcome.Written) android.util.Log.i("AmpMp3", "indexed ${file.name}: ${it.frames} frames") }
                         .onFailure { android.util.Log.w("AmpMp3", "couldn't index ${file.name}", it) }
                 }
-                // The sleeve is part of having the record offline — this
-                // source's sleeve, from this source's server.
                 runCatching { App.artwork.prefetch(source.id, client, next.coverArtId) }
-                // Always: the words are a few kilobytes beside a song, and an
-                // offline track without them is the one place they cannot be
-                // fetched on demand.
                 val lyrics = fetchLyrics(client, next, wantKaraoke)
                 dao.upsertDownload(
                     DownloadEntity(
@@ -623,15 +515,9 @@ class Downloader(
                 clearBackOff(source.id)
                 lock.withLock { queue.complete(entry) }
             } else {
-                // A cancelled worker must not put the track back: cancelAll has
-                // just emptied the queue it would go into.
+                // A cancelled worker must not put the track back: cancelAll
+                // has just emptied the queue it would go into.
                 coroutineContext.ensureActive()
-                // A failed transfer is the server's problem more often than the
-                // track's: hold *this source's* queue and let the next
-                // reachability check start it again, rather than failing all ten
-                // thousand in a row. Where the track goes back to — front, or
-                // back after enough strikes — is the queue's rule; see
-                // [DownloadQueue.fail].
                 lock.withLock { queue.fail(picked) }
                 _progress.value = _progress.value.copy(error = store.lastError)
                 backOff(source.id)

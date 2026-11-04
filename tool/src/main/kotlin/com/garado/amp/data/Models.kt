@@ -18,39 +18,20 @@ data class Track(
     val liked: Boolean = false,
     /** Rating 1-100, or 0 when unrated. */
     val rating: Int = 0,
-    /** Tags, when the server sends them — blank means "this library has none". */
+    /** Tags, when the server sends them. Blank means this library has none. */
     val genre: String = "",
     val composer: String = "",
-    /**
-     * Where the server keeps the actual file, when it will name one.
-     *
-     * Subsonic streams by song id and never needs this; Plex will hand over the
-     * file untouched, but only from a path it gives out alongside the track's
-     * metadata. Blank means "ask by id", which is what every other server wants.
-     */
+    /** Direct file path from the server (used by Plex). Blank means stream by id. */
     val streamPath: String = "",
-    /**
-     * Loudness-normalisation gain in dB, when the server knows one — Navidrome
-     * sends ReplayGain track gain, Jellyfin its own LUFS-based measurement.
-     * Null means the source offered nothing and the track plays untouched.
-     */
+    /** Loudness-normalisation gain in dB from the server, or null if none was provided. */
     val gainDb: Float? = null,
 )
 
 /**
- * Every album artist a track is credited to.
+ * Splits a multi-artist credit into individual names.
  *
- * A record with more than one arrives as a single string — "Johann Sebastian
- * Bach; Glenn Gould" — because that is what both the tag and the server's
- * display field are, so a client that reads it whole invents a compound artist
- * that exists on exactly one record. Each name is its own artist, and a record
- * counts toward all of them.
- *
- * Split on the semicolon **only**. A comma sits inside plenty of single names —
- * "Earth, Wind & Fire", "Emerson, Lake & Palmer", "Crosby, Stills & Nash" — and
- * splitting on it would tear those into artists who never existed. (The tag
- * lists take the opposite view: see LibraryRepository.splitTag, where a comma
- * really does separate two genres.)
+ * Splits only on `;`. A comma can appear inside a single artist's name
+ * (e.g. "Earth, Wind & Fire").
  */
 fun Track.albumArtistNames(): List<String> {
     val raw = albumArtist.ifBlank { artist }
@@ -58,40 +39,25 @@ fun Track.albumArtistNames(): List<String> {
     return names.ifEmpty { listOfNotNull(raw.takeIf { it.isNotBlank() }) }
 }
 
-/**
- * The one to show where only one will fit — a record's first credit, which is
- * the one it is filed under everywhere else.
- */
+/** The first credited artist, the one a record is filed under. */
 fun Track.primaryAlbumArtist(): String =
     albumArtistNames().firstOrNull() ?: albumArtist.ifBlank { artist }
 
 /**
- * One tag field, split into the values it actually holds.
- *
- * Navidrome joins a multi-valued tag with a comma or a semicolon, so "Jazz; Soul"
- * is two genres rather than one oddly named one. Unlike an artist credit — see
- * [albumArtistNames] — a comma here really is a separator, because a genre or a
- * composer is a single name and not a band called "Earth, Wind & Fire".
+ * Splits a multi-valued tag (genre, composer) on comma or semicolon.
+ * Unlike [albumArtistNames], a comma here is a real separator.
  */
 fun splitTagValues(raw: String): List<String> =
     raw.split(',', ';').map { it.trim() }.filter { it.isNotEmpty() }
 
-/**
- * What a library list has been narrowed to. Blank means "not narrowed".
- *
- * The two are independent and combine: a genre *and* a composer leaves what
- * carries both, which is the only reading that lets either be set without
- * silently clearing the other.
- */
+/** A library filter by genre and/or composer. Both apply together when set. */
 data class TagFilter(val genre: String = "", val composer: String = "") {
     val isEmpty: Boolean get() = genre.isEmpty() && composer.isEmpty()
 }
 
-/** Whether this track carries [value] as one of its genres. */
 fun Track.hasGenre(value: String): Boolean =
     splitTagValues(genre).any { it.equals(value, ignoreCase = true) }
 
-/** Whether this track carries [value] as one of its composers. */
 fun Track.hasComposer(value: String): Boolean =
     splitTagValues(composer).any { it.equals(value, ignoreCase = true) }
 
@@ -104,17 +70,10 @@ data class Album(
     val durationMs: Long,
     val songCount: Int,
     val year: Int?,
-    // Release date as a sortable YYYYMMDD number (0 when the server sends none).
-    // Ordering a discography needs finer granularity than the year alone.
+    // Sortable YYYYMMDD release date, 0 if the server doesn't send one.
     val releaseDate: Long = 0L,
     val createdMs: Long = 0L,
-    /**
-     * When the *server* last changed this album, 0 where it doesn't say.
-     *
-     * The only handle on "has this album changed" for a server that doesn't
-     * report a song count — see LibraryRepository's sync filter, and
-     * PlexClient.toAlbum, which is where it actually arrives.
-     */
+    /** When the server last changed this album, 0 if it doesn't say. */
     val updatedMs: Long = 0L,
     val playCount: Int = 0,
     val lastPlayedMs: Long = 0L,
@@ -127,7 +86,7 @@ data class Album(
 /** Derived client-side by grouping tracks; the server is album-centric. */
 data class Artist(
     val name: String,
-    /** The server's own picture of them, when it has one — see ArtistRef. */
+    /** The server's own picture of them, when it has one. See ArtistRef. */
     val imageId: String? = null,
     val albumCount: Int,
     val trackCount: Int,
@@ -144,15 +103,7 @@ data class Playlist(
     val createdAt: Long,
     val updatedAt: Long,
     val trackIds: List<String>,
-    /**
-     * The server owns this one's contents — Plex's smart playlists, which it
-     * builds from a filter.
-     *
-     * They arrive from the same endpoint as ordinary playlists and are real
-     * objects on the server, so a delete here would really delete one. Adding
-     * to one is refused outright. Shown, because a smart playlist someone made
-     * is still theirs to listen to — but not offered as something to change.
-     */
+    /** True for server-managed playlists (e.g. Plex smart playlists). Shown but not editable. */
     val readOnly: Boolean = false,
 )
 
@@ -160,37 +111,23 @@ data class Playlist(
 data class Starred(
     val songIds: Set<String>,
     val albumIds: Set<String>,
-    // Artists are matched by name: our Artist list is derived from track tags,
-    // so the server's artist ids don't line up with it.
+    // Artists are matched by name: the local Artist list is derived from track
+    // tags and has no server ids.
     val artistNames: Set<String> = emptySet(),
 )
 
-/** A server-side artist entry, used only to resolve ids for starring. */
-/**
- * An artist as the *server* knows them, which is not how the app does.
- *
- * The library's artists are derived from track tags, so they have names and
- * nothing else. This is the bridge to the server's own record of the same
- * artist: its id, for starring, and its picture.
- */
+/** A server-side artist entry, used to resolve ids for starring and artist art. */
 data class ArtistRef(
     val id: String,
     val name: String,
-    /**
-     * Cover id for their picture, in whatever form that server's coverArtUrl
-     * takes: a path on Plex, the artist's own id on Subsonic — Navidrome serves
-     * artist art from getCoverArt when given one.
-     */
+    /** Cover id for their picture; format varies by server. */
     val imageId: String? = null,
 )
 
 /** A server library / music folder (Navidrome exposes each library as one). */
 data class MusicFolder(val id: String, val name: String)
 
-/**
- * Streaming format. "raw" streams the original file untouched; the others ask
- * Navidrome to transcode on the fly to something the device can always decode.
- */
+/** Streaming format. RAW streams the original file; the others transcode via Navidrome. */
 enum class StreamFormat(val id: String, val maxBitRate: Int?) {
     MP3("mp3", 320),
     OPUS("opus", 192),
@@ -198,12 +135,7 @@ enum class StreamFormat(val id: String, val maxBitRate: Int?) {
     RAW("raw", null);
 
     companion object {
-        /**
-         * Opus at 192 kbps: transparent for practically all material, ~40% the
-         * size of MP3 320, and measurably cheaper for the server to transcode
-         * (~26x realtime against MP3's ~12x on this library's ALAC sources).
-         * Both streaming and downloads resolve their default through here.
-         */
+        /** Default for both streaming and downloads: near-transparent quality at a low bitrate. */
         val DEFAULT = OPUS
 
         fun fromId(id: String?): StreamFormat =

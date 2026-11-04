@@ -37,30 +37,19 @@ import com.thelightphone.sdk.SimpleLightScreen
 
 /**
  * The page's own menu: where its music comes from, and the three ways of
- * looking at it.
- *
- * One place for all of them. View, sort and filter used to be spread across a
- * title tap, a heart in a menu's corner and a section folded into the sort
- * list — three different gestures, none of which said what it was currently
- * set to without being opened. Here each states its value on its own line.
- *
- * Every row shows whether or not the page can change it. A song list has one
- * layout and a record has one order, and saying so is more use than a row that
- * silently isn't there: an absent row reads as a missing feature, where "View:
- * List" reads as the answer. Those rows don't take a press — see [TextRow].
+ * looking at it. Every row shows its value even when the page can't change it,
+ * since an absent row reads as a missing feature. Those rows don't take a
+ * press. See [TextRow].
  */
 class MoreScreen(
     sealed: SealedLightActivity,
     /** The list underneath, whose modifiers this page carries. */
     private val page: LibraryPage,
-    /**
-     * What that list is called, where its name isn't a constant — a record, an
-     * artist, a playlist, a genre. See [defaultTitle] for the rest.
-     */
+    /** The list's name, for pages without a constant title. See [defaultTitle]. */
     private val pageTitle: String? = null,
 ) : SimpleLightScreen<Unit>(sealed) {
 
-    // While casting, the rocker belongs to the speaker — see handleVolumeKey.
+    // While casting, the rocker belongs to the speaker. See handleVolumeKey.
     override fun onKeyDown(keyCode: Int, event: KeyEvent): Boolean =
         App.playback.handleVolumeKey(keyCode) || super.onKeyDown(keyCode, event)
 
@@ -72,43 +61,26 @@ class MoreScreen(
         // composition, where a @Composable can't be called.
         val view = viewOf(page)
         val sort = sortOf(page)
-        // Under Simplified both of these have moved onto the library page: the
-        // liked lists are entries there rather than a filter over a tab, and
-        // the pages this used to lead to are on it too. What is left here is
-        // what this menu is actually for — how the page in front of you looks.
+        // Under Simplified, liked lists are entries on the library page instead
+        // of a filter here.
         val simplified = App.layoutMode.collectAsState().value == LayoutMode.SIMPLIFIED
         val likedTab = if (simplified) null else likedFilterTab(page)
         val liked = likedTab != null && likedOnly(likedTab)
-        // Shown under both layouts, unlike the liked filter: these narrowings
-        // have no other home now that the tag pages are gone.
         val genre = tagSettingOf(page, byComposer = false)
         val composer = tagSettingOf(page, byComposer = true)
 
-        // Covers the tab bar rather than sitting above it: this is the library
-        // page's own menu, opened from its header, and a menu that leaves the
-        // navigation showing underneath reads as another page rather than as
-        // something on top of the one you were on.
+        // Covers the tab bar rather than sitting above it, so this reads as the
+        // library page's own menu, not a separate page.
         val body: @Composable ColumnScope.() -> Unit = {
             AppHeader(
-                // Named after the page it belongs to, the way the sort menus
-                // are: this is that page's menu, and a header reading "More"
-                // over a row reading "More" says nothing about where you are.
                 title = pageTitle ?: defaultTitle(page),
                 fitTitle = true,
                 onBack = { goBack() },
-                // No search here: this page is a short menu you read rather than
-                // a list you look through, and search belongs to the library
-                // pages it would send you back to anyway.
                 rightAction = HeaderAction(AppIcons.Settings) { go { SettingsScreen(it) } },
             )
             ScrollableList(modifier = Modifier.fillMaxSize()) {
-                // Where the music comes from, and the only row here that isn't
-                // the page's own — every library page is a view of one source,
-                // so it heads the list the rest of it describes.
-                //
-                // Absent where there is nothing to choose: one source holding one
-                // library is a row that names what you are already looking at and
-                // leads to a page with a single entry on it.
+                // Hidden when there's nothing to choose: one source with one
+                // library has only the one entry you're already looking at.
                 if (sources.size > 1 || (active?.libraries?.size ?: 0) > 1) {
                 item {
                     TextRow(
@@ -121,36 +93,21 @@ class MoreScreen(
                     )
                 }
                 }
-                // Directly under the source, above the rows that describe how
-                // the page is drawn: this one says *what is in it*, which is the
-                // first thing to settle and the thing the others then apply to.
                 if (likedTab != null) {
                     item {
-                        // Named for what it narrows to — "Liked Albums", not
-                        // "Liked Only" — through the same helper the page title
-                        // uses, so the switch and the header it changes cannot
-                        // end up calling the same thing two different things.
+                        // Uses tabTitle's own label, e.g. "Liked Albums", not "Liked Only".
                         ToggleRow(tabTitle(likedTab, likedOnly = true), liked) {
                             App.scope.launch { setLikedOnly(likedTab, !liked) }
-                            // Straight back to the narrowed list, as choosing in
-                            // the picker used to do — seeing the result is the
-                            // point of the tap, and the list says which way the
-                            // switch went better than the switch does.
                             goBack()
                         }
                     }
                 }
-                // Only where there is something to choose. A row that states a
-                // value and does nothing when tapped reads as a control that is
-                // broken rather than as an answer — the fixed orders these
-                // pages have (a record plays as it was cut) are better said by
-                // the list itself than by a dead row above it.
                 if (view.open != null) item { Setting("View", view) }
                 if (sort.open != null) item { Setting("Sort by", sort) }
                 if (genre != null) item { Setting("Genre", genre) }
                 if (composer != null) item { Setting("Composer", composer) }
                 // A server that can only create a playlist with songs in it has no
-                // use for a bare "New Playlist" — see MusicSource.supportsEmptyPlaylists.
+                // use for a bare "New Playlist". See MusicSource.supportsEmptyPlaylists.
                 if (page == LibraryPage.PLAYLISTS && active?.supportsEmptyPlaylists == true) {
                     item { TextRow(title = "New Playlist", onClick = { createPlaylistFlow() }) }
                 }
@@ -174,13 +131,8 @@ class MoreScreen(
     }
 
     /**
-     * Open a picker, and stand aside once it has been used.
-     *
-     * Choosing a sort is a request to see the reordered list, not to come back
-     * here — so the picker reports its pick and this page leaves with it,
-     * putting the list one tap below the choice. Backing out of a picker
-     * without choosing reports nothing (see LightActivity.deliverResult) and
-     * lands here, which is where you were.
+     * Opens a picker and leaves with its result, so the reordered list ends up
+     * one tap below the choice. Backing out without choosing lands back here.
      */
     private fun change(factory: (SealedLightActivity) -> SimpleLightScreen<Unit>) {
         navigateTo(factory, resultCallback = { goBack() })
@@ -206,8 +158,7 @@ private fun defaultTitle(page: LibraryPage): String = when (page) {
     LibraryPage.SEARCH -> "Search"
     LibraryPage.LIBRARY -> "Library"
     LibraryPage.DOWNLOADS -> "Downloads"
-    // Named after a record, a person, a playlist or a tag, so the page hands
-    // its own title over — see MoreScreen.pageTitle.
+    // These get their title from the page itself. See MoreScreen.pageTitle.
     LibraryPage.ALBUM -> "Album"
     LibraryPage.ARTIST, LibraryPage.ARTIST_SONGS -> "Artist"
     LibraryPage.PLAYLIST -> "Playlist"
@@ -215,10 +166,8 @@ private fun defaultTitle(page: LibraryPage): String = when (page) {
 
 /**
  * What one modifier is set to on a given page, and where to change it.
- *
- * [open] is null when the page offers no choice, which is the common case: a
- * song list is a list, a record plays in its own order. The row still appears —
- * see [MoreScreen].
+ * [open] is null when the page offers no choice. The row still appears.
+ * See [MoreScreen].
  */
 private class PageSetting(
     val value: String,
@@ -227,11 +176,8 @@ private class PageSetting(
 )
 
 /**
- * List or grid.
- *
- * Only album lists have the choice, and only while artwork is on — a grid of
- * blank squares is not a way of looking at anything. The albums tab and an
- * artist's discography keep separate answers, so each names its own screen.
+ * List or grid. Only album lists have the choice, and only while artwork is
+ * on. The albums tab and an artist's discography keep separate answers.
  */
 @Composable
 private fun viewOf(page: LibraryPage): PageSetting {
@@ -251,11 +197,8 @@ private fun viewOf(page: LibraryPage): PageSetting {
 }
 
 /**
- * The order the page is in.
- *
- * A page whose order was never yours to choose still answers here, but the
- * caller drops the row rather than drawing it — see Content. The value is kept
- * because working out whether there *is* a choice is the same work as naming it.
+ * The order the page is in. Pages with a fixed order still return a value;
+ * the caller decides whether to show the row. See Content.
  */
 @Composable
 private fun sortOf(page: LibraryPage): PageSetting = when (page) {
@@ -298,7 +241,7 @@ private fun sortOf(page: LibraryPage): PageSetting = when (page) {
         }
     }
 
-    // Fixed orders, named as they actually are — see LibraryRepository.
+    // Fixed orders. See LibraryRepository.
     LibraryPage.ALBUM -> PageSetting("Track order")
     LibraryPage.ARTIST -> PageSetting("Date Released")
     LibraryPage.ARTIST_SONGS -> PageSetting("Album")
@@ -313,11 +256,11 @@ private fun sortable(
     label: String,
     naturallyDescending: Boolean,
     reversed: Boolean,
-    /** True for an order with no direction — Random — which gets no arrow. */
+    /** True for an order with no direction, like Random, which gets no arrow. */
     directionless: Boolean = false,
     open: (SealedLightActivity) -> SimpleLightScreen<Unit>,
 ): PageSetting {
-    // `reversed` inverts the option's natural direction — as in SortOptions.
+    // `reversed` inverts the option's natural direction, as in SortOptions.
     val descending = naturallyDescending != reversed
     return PageSetting(
         value = label,
@@ -337,17 +280,8 @@ private fun sortable(
 
 /**
  * The tab this page can be narrowed to liked-only, or null where it can't.
- *
- * A switch rather than a row that opens a picker, which is what this was: liked
- * and all are the only two answers there will ever be, so a page to choose
- * between them was a tap and a screen spent saying what a toggle says in place.
- * Its neighbours keep their pickers because they have more than two answers.
- *
- * Null where the question doesn't arise — including on the pages that used to
- * answer "All" and do nothing when tapped. A switch that cannot be moved is
- * worse than no row at all, where a value that cannot change was merely inert.
- * Plex and the phone's own files have no likes either — see
- * MusicSource.supportsLikes.
+ * A toggle rather than a picker, since liked/all are the only two answers.
+ * Null for sources with no likes too. See MusicSource.supportsLikes.
  */
 @Composable
 private fun likedFilterTab(page: LibraryPage): LibraryTab? {
@@ -362,18 +296,12 @@ private fun likedFilterTab(page: LibraryPage): LibraryTab? {
 
 /**
  * The genre or composer this page has been narrowed to, where it can be.
- *
- * Only the two lists of things a tag describes, and only where the library
- * actually carries that tag — a server that fills in neither shouldn't offer a
- * row that could only ever say "All". This is what the browsable Genres and
- * Composers pages became: narrowing the list you are on says the same thing as
- * a page per value, without a second way to reach every record.
+ * Only Albums and Songs, and only where the library carries that tag.
  */
 @Composable
 private fun tagSettingOf(page: LibraryPage, byComposer: Boolean): PageSetting? {
-    // All read before the branch: a collectAsState behind a condition is a
-    // conditional composable call, and the state it subscribes to stops
-    // triggering recomposition — the bug AlbumsTab documents.
+    // Read unconditionally; a collectAsState behind a branch is a conditional
+    // composable call and stops recomposing on that state.
     val values by (if (byComposer) App.library.composers else App.library.genres)
         .collectAsState()
     val albums = App.albumsTagFilter.collectAsState().value
@@ -385,9 +313,7 @@ private fun tagSettingOf(page: LibraryPage, byComposer: Boolean): PageSetting? {
     }
     val filter = if (tab == LibraryTab.ALBUMS) albums else songs
     val chosen = if (byComposer) filter.composer else filter.genre
-    // Offered where the library carries the tag — or where a filter is set,
-    // whatever the library carries: a row that hides while it is narrowing
-    // the list leaves no way to un-narrow it.
+    // Also shown when a filter is already set, so there's always a way to clear it.
     if (values.isEmpty() && chosen.isEmpty()) return null
     return PageSetting(
         value = chosen.ifEmpty { "All" },
@@ -408,7 +334,7 @@ class AboutScreen(sealed: SealedLightActivity) : SimpleLightScreen<Unit>(sealed)
                 AppText("amp", pxSp(LightType.HEADING_PX))
                 AppText("Version ${BuildConfig.VERSION_NAME}", pxSp(LightType.DETAIL_PX), dim = true)
                 AppText(
-                    "(A)nother (M)usic (P)layer — for the Light Phone III. Streams " +
+                    "(A)nother (M)usic (P)layer - for the Light Phone III. Streams " +
                         "and downloads from your own Navidrome, Subsonic, Plex or " +
                         "Bandcamp library, and plays files kept on the phone.",
                     pxSp(LightType.PARAGRAPH_PX),

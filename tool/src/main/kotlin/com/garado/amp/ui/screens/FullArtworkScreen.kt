@@ -37,22 +37,16 @@ import com.thelightphone.sdk.SimpleLightScreen
 import com.thelightphone.sdk.ui.LightThemeTokens
 
 /**
- * An album's cover at full width, from its own page.
- *
- * Whole rather than cropped to a square, hanging from the header's bottom edge,
- * with nothing playing behind it: no seek line, no play button, just which
- * record this is and the way back. Tapping a sleeve on the album page is a
- * request to look at it, not to start it.
- *
- * Reads the album from the library rather than taking a copy, so a sync that
- * corrects a title changes it here too.
+ * An album's cover at full width, uncropped, with no playback controls.
+ * Reads the album from the library rather than a copy, so a title edited by
+ * sync is reflected here too.
  */
 class AlbumArtworkScreen(
     sealed: SealedLightActivity,
     private val albumId: String,
 ) : SimpleLightScreen<Unit>(sealed) {
 
-    // While casting, the rocker belongs to the speaker — see handleVolumeKey.
+    // While casting, the rocker belongs to the speaker. See handleVolumeKey.
     override fun onKeyDown(keyCode: Int, event: KeyEvent): Boolean =
         App.playback.handleVolumeKey(keyCode) || super.onKeyDown(keyCode, event)
 
@@ -70,36 +64,18 @@ class AlbumArtworkScreen(
                         TitleCard(album?.title.orEmpty(), album?.artist.orEmpty())
                     },
                 )
-                // Clipped here, on the box, rather than on the image's own layer.
-                // A layer's `clip` applies to its contents *before* the layer's
-                // transform, so scaling the picture scales its clip rectangle
-                // with it — the picture grows over the header and takes
-                // permission to be there along with it. This box is never
-                // transformed, so what it clips to is the space below the
-                // header, whatever the zoom does inside it.
+                // Clip on this outer box, not the image's own graphicsLayer: a
+                // layer's clip scales with its transform, so clipping on the
+                // image would let a zoomed-in picture spill over the header.
                 Box(modifier = Modifier.fillMaxSize().clipToBounds()) {
                     if (image != null) {
-                        // Pinch to look closer, drag to move around inside it —
-                        // the reason to open a sleeve on its own page is often a
-                        // detail in the corner of it. The player's cover has
-                        // none of this: there the picture shares the screen with
-                        // a seek line you drag, and two gestures over one image
-                        // would fight.
                         var zoom by remember { mutableStateOf(1f) }
                         var pan by remember { mutableStateOf(Offset.Zero) }
                         var frame by remember { mutableStateOf(IntSize.Zero) }
 
                         /**
-                         * Keeps the picture over every pixel it covered at rest.
-                         *
-                         * Scaling anchors the top-left, so the content runs from
-                         * `pan` to `pan + size * zoom`. Holding pan between
-                         * `-(size * (zoom - 1))` and zero is exactly the range
-                         * where that still spans the frame — push past either end
-                         * and the background shows through at an edge, which on a
-                         * sleeve reads as the image having come apart. At zoom 1
-                         * the range collapses to zero and the picture sits back
-                         * where it started.
+                         * Clamps pan to [-(size * (zoom - 1)), 0] on each axis, the
+                         * range that keeps the zoomed image covering the frame.
                          */
                         fun clamped(next: Offset, at: Float): Offset {
                             val slackX = (frame.width * (at - 1f)).coerceAtLeast(0f)
@@ -124,27 +100,17 @@ class AlbumArtworkScreen(
                                     scaleY = zoom
                                     translationX = pan.x
                                     translationY = pan.y
-                                    // Top-left, so the clamp above can be stated
-                                    // in the picture's own coordinates rather
-                                    // than around a moving centre.
+                                    // Top-left origin matches the clamp above.
                                     transformOrigin = TransformOrigin(0f, 0f)
                                 }
                                 .pointerInput(Unit) {
                                     detectTransformGestures { centroid, drag, pinch, _ ->
                                         val was = zoom
                                         val now = (was * pinch).coerceIn(MIN_ZOOM, MAX_ZOOM)
-                                        // Whatever is under the fingers stays
-                                        // under them: without this the picture
-                                        // slides away from the detail you were
-                                        // pinching towards.
+                                        // Keeps the point under the fingers fixed while zooming.
                                         val focus = (centroid - pan) * (now / was)
-                                        // The drag is scaled by the zoom, so a
-                                        // swipe crosses the same *fraction of the
-                                        // sleeve* however far in you are. Moved
-                                        // one-to-one with the finger it takes
-                                        // eight swipes at 8x to cross what one
-                                        // swipe crosses at 1x, which is what
-                                        // makes a close look feel stuck.
+                                        // Drag scaled by zoom, so a swipe covers the same
+                                        // fraction of the image at any zoom level.
                                         zoom = now
                                         pan = clamped(centroid - focus + drag * now, now)
                                     }
@@ -164,14 +130,7 @@ class AlbumArtworkScreen(
     }
 }
 
-/**
- * How far a sleeve may be pinched.
- *
- * Four is about where it stops being worth it: the bitmap is decoded at screen
- * width, and the file behind it is often smaller still, so past this there are
- * no more pixels to find — only bigger ones. Under one there is nothing to see
- * either, the picture already being as wide as the screen.
- */
+/** Zoom range. The bitmap is decoded at screen width, so 4x is past the point of finding more detail. */
 private const val MIN_ZOOM = 1f
 private const val MAX_ZOOM = 4f
 

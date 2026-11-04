@@ -22,11 +22,7 @@ data class JellyfinSession(
     val serverName: String,
 )
 
-/**
- * Signing in to a Jellyfin server, which is the one thing [JellyfinClient]
- * cannot do for itself: it needs a token to make any request, and getting one
- * is the request that has no token.
- */
+/** Signs in to a Jellyfin server; the one request [JellyfinClient] can't make itself, since it needs no token. */
 object JellyfinSignIn {
 
     private val json = Json {
@@ -36,13 +32,9 @@ object JellyfinSignIn {
     }
 
     /**
-     * Exchange an account for an access token.
-     *
-     * The identifying header goes on unauthenticated too — Jellyfin refuses the
-     * login itself without one, because the session it is about to create has
-     * to be attributed to some client. Null on anything that isn't a clean
-     * sign-in: a wrong password, an address with no Jellyfin behind it, a server
-     * that isn't answering.
+     * Exchange an account for an access token. The identifying header is
+     * sent even unauthenticated, since Jellyfin refuses the login itself
+     * without one. Null on anything short of a clean sign-in.
      */
     suspend fun authenticate(
         baseUrl: String,
@@ -71,8 +63,8 @@ object JellyfinSignIn {
             }.getOrNull() ?: return null
             if (result.accessToken.isBlank() || result.user.id.isBlank()) return null
 
-            // The server's own name, for the Sources page. Public, so a failure
-            // here is cosmetic and must not cost an otherwise good sign-in.
+            // The server's own name, for the Sources page. A failure here is
+            // cosmetic and must not fail an otherwise good sign-in.
             val serverName = runCatching {
                 val info = http.get("$root/System/Info/Public") { header("Accept", "application/json") }
                 json.decodeFromString<JellyfinPublicInfo>(info.bodyAsText()).serverName

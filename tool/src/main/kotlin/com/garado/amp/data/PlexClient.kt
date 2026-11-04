@@ -27,17 +27,10 @@ import kotlinx.serialization.json.contentOrNull
  * A Plex Media Server's music library, behind the same [MusicServer] interface
  * Navidrome uses.
  *
- * **What Plex can't do**, and so is left out rather than faked (see the
- * capability flags on [MusicSource], which is what the UI actually reads):
- * - **Favourites.** Plex has star ratings but no separate "loved" flag, so
- *   there is nothing for a heart to sync to.
- * - **Popular songs.** No dependable per-artist ranking over the API.
- * - **Lyrics.** Only where a track happens to carry a lyric stream, which most
- *   libraries don't.
- *
- * Everything else — browsing, artwork, streaming, playlists, play counts and
- * star ratings — round-trips to the server, so what you do here shows up in
- * PlexAmp and vice versa.
+ * Not supported: favourites (Plex has only star ratings, no separate "loved"
+ * flag), popular songs (no reliable per-artist ranking via the API), and
+ * lyrics (only present when a track happens to carry a lyric stream). See the
+ * capability flags on [MusicSource].
  */
 class PlexClient(
     /** A server connection URI, e.g. `http://192.168.1.10:32400`. */
@@ -69,7 +62,7 @@ class PlexClient(
     private suspend fun fetch(path: String, params: List<Pair<String, String>> = emptyList()): PlexResponse =
         decode(rawBody(path, params))
 
-    /** The body as text, for the one answer whose shape isn't declared — see [stationKeyFor]. */
+    /** The body as text, for the one answer whose shape isn't declared. See [stationKeyFor]. */
     private suspend fun rawBody(path: String, params: List<Pair<String, String>> = emptyList()): String {
         val query = params.joinToString("&") { (k, v) -> "$k=${enc(v)}" }
         val url = baseUrl.trimEnd('/') + path + if (query.isEmpty()) "" else "?$query"
@@ -80,7 +73,7 @@ class PlexClient(
         return response.bodyAsText()
     }
 
-    /** A POST whose answer matters — creating a play queue hands its items back. */
+    /** A POST whose answer matters: creating a play queue hands its items back. */
     private suspend fun rawPost(path: String, params: List<Pair<String, String>> = emptyList()): String {
         val query = params.joinToString("&") { (k, v) -> "$k=${enc(v)}" }
         val url = baseUrl.trimEnd('/') + path + if (query.isEmpty()) "" else "?$query"
@@ -122,16 +115,14 @@ class PlexClient(
     }
 
     override suspend fun ping() {
-        // Any authenticated endpoint will do; sections is the cheapest that
-        // proves both the address and the token.
+        // Any authenticated endpoint works; sections is the cheapest that
+        // confirms both the address and the token.
         fetch("/library/sections")
     }
 
     /**
-     * The server's own id, which playlist URIs are built from.
-     *
-     * Comes free with a linked account, but a server reached by address and
-     * token has to be asked — and without it nothing can be added to a playlist.
+     * The server's own id, used to build playlist URIs. Comes free with a
+     * linked account; a server reached by address and token must request it.
      */
     suspend fun identity(): String? =
         runCatching { fetch("/identity").container.machineIdentifier }.getOrNull()
@@ -144,9 +135,8 @@ class PlexClient(
             .map { MusicFolder(id = it.key, name = it.title) }
 
     /**
-     * Every album, from one section or all of the music ones.
-     *
-     * Plex asks for a section and a type; `8` is artist, `9` album, `10` track.
+     * Every album, from one section or all music sections.
+     * Plex section types: 8 artist, 9 album, 10 track.
      */
     override suspend fun getAllAlbums(musicFolderId: String?): List<Album> {
         val sections = musicFolderId?.let { listOf(it) } ?: getMusicFolders().map { it.id }
@@ -154,17 +144,11 @@ class PlexClient(
     }
 
     /**
-     * One section's albums, a page at a time.
-     *
-     * Plex will cap a large response and say so through `totalSize`; asking for
-     * everything in one request quietly returns a prefix on a big library. The
-     * loop stops when a page comes back short or the total is reached, so a
-     * server that doesn't page at all costs exactly one request.
-     *
-     * The explicit sort matters as much as the paging: pages are offsets into a
-     * result set, and without an ordering the server is free to hand back the
-     * rows in a different arrangement each time — which drops some albums and
-     * repeats others across the page boundary.
+     * One section's albums, fetched a page at a time. Plex caps large
+     * responses without saying so beyond `totalSize`, so paging is required
+     * for a big library. An explicit sort is required too: without one, the
+     * server can reorder rows between page requests, dropping or repeating
+     * albums across the page boundary.
      */
     private suspend fun albumsInSection(section: String): List<Album> =
         pagedSection(section, ALBUM_TYPE).map { it.toAlbum() }
@@ -177,14 +161,11 @@ class PlexClient(
         )
 
     /**
-     * A container's every item, a page at a time — see [pagedSection] for why
-     * Plex is never asked for everything in one request.
-     *
-     * Playlists too, and for a second reason: their items come with the full
-     * media description of every track, and one large playlist answered as a
-     * single 27 MB body that the phone could not hold — the fetch failed out
-     * of memory, in the background, on every download top-up. No `sort` is
-     * added here; a playlist's order is its own, and a section names its own.
+     * A container's every item, fetched a page at a time (see [pagedSection]
+     * for why Plex is never asked for everything at once). Also used for
+     * playlists, whose per-track media descriptions can make a single
+     * response too large to hold in memory. No `sort` is added, since a
+     * playlist's order is its own.
      */
     private suspend fun paged(
         path: String,
@@ -209,22 +190,16 @@ class PlexClient(
     }
 
     /**
-     * Plex's "Scan Library Files", which is what actually makes it notice a
-     * record you copied in. Not forced: the plain refresh looks for what has
-     * changed, where `force=1` walks every file again — minutes of disk on a
-     * large library, to answer a question the quick pass already answers.
-     *
-     * Silently does nothing on a server this token doesn't administer, which is
-     * the ordinary case for a library someone shared with you.
+     * Triggers Plex's library scan for new files. Uses the plain refresh, not
+     * `force=1`, which walks every file and is much slower. Does nothing on a
+     * server this token doesn't administer (e.g. a shared library).
      */
     override suspend fun startServerScan(musicFolderId: String?): Boolean {
         val sections = musicFolderId?.let { listOf(it) }
             ?: runCatching { getMusicFolders().map { it.id } }.getOrDefault(emptyList())
         if (sections.isEmpty()) return false
-        // The answer matters. Scanning is an owner's privilege, so a library
-        // shared with you refuses it — and a refusal that goes unreported looks
-        // exactly like a server that scanned and found nothing, which is the
-        // most confusing way for this to fail.
+        // Scanning is an owner privilege; a refusal must be reported, since it
+        // looks identical to a scan that found nothing.
         return sections.map { sendChecked("/library/sections/$it/refresh") }.any { it }
     }
 
@@ -243,19 +218,11 @@ class PlexClient(
     }
 
     /**
-     * An artist's best-known songs — the same query PlexAmp's Popular Tracks
-     * runs, rather than anything this app invents.
-     *
-     * Popularity is `ratingCount`, the listener count that arrives with Plex's
-     * music metadata, so it means "well known" and not "played a lot on this
-     * server". Compilations and live records are left out because they'd fill
-     * the list with second versions of songs already in it, and grouping by
-     * title collapses the rest. A library whose metadata carries no rating
-     * counts returns nothing, and the app leaves the section out entirely
-     * rather than showing some other list under the same name.
-     *
-     * The names the app knows come from track tags, so the artist has to be
-     * looked up by name first; that index is built once and kept.
+     * An artist's best-known songs, using the same query as PlexAmp's Popular
+     * Tracks. Ranked by `ratingCount` (Plex's listener-count metadata, not
+     * local play count). Compilations and live albums are excluded, and
+     * results are grouped by title. Returns empty if the library's metadata
+     * carries no rating counts.
      */
     override suspend fun getTopSongs(artistName: String, count: Int): List<Track> {
         val (section, key) = artistLocation(artistName) ?: return emptyList()
@@ -297,27 +264,14 @@ class PlexClient(
         fetch("/library/metadata/$albumId/children").container.metadata.map { it.toTrack() }
 
     /**
-     * Plex has two answers to "songs like this one", and either is taken.
-     *
-     * The first is the station it builds for the track — `includeStations=1`
-     * on the track's metadata names it, and a play queue created from the
-     * station's key is how any station hands out its songs (python-plexapi's
-     * `Artist.station()` + `PlayQueue.fromStationKey`, with the key's own
-     * `?type=10` kept). The second is the tracks it judges nearest, where the
-     * server has done its sonic analysis — what Plexamp's Track Radio draws
-     * on. Both are Plex's own judgement of the same question, so whichever the
-     * server can answer is the radio; what it answered is logged under
-     * `AmpRadio`, because neither could be verified here against a live server.
-     * Empty when it has neither — the caller says so; nothing plays instead.
+     * Plex's "songs like this one": either the station built for the track,
+     * or the tracks it judges nearest via sonic analysis (a Plex Pass
+     * feature). Falls back from track station, to nearest tracks, to the
+     * artist's station. Results are logged under the `AmpRadio` tag. Empty if
+     * the server has neither.
      */
     override suspend fun getSimilarSongs(songId: String, count: Int): List<Track> {
         val limit = if (count > 0) count else RADIO_DEFAULT
-        // Three askings, each Plex's own, most song-specific first. On the
-        // server this was checked against, a track carries no station and
-        // `nearest` answers nothing (sonic analysis is a Plex Pass feature),
-        // and the artist's station is what Plex actually has — which is also
-        // what Navidrome's song radio is underneath: the song's artist and the
-        // artists like them.
         val own = runCatching { stationTracks(songId, "track") }
             .onFailure { android.util.Log.w(RADIO_TAG, "plex track station failed: ${it.message}") }
             .getOrDefault(StationAnswer())
@@ -328,12 +282,9 @@ class PlexClient(
         android.util.Log.i(RADIO_TAG, "plex nearest: ${nearest.size} tracks for $songId")
         if (nearest.isNotEmpty()) return nearest
         val artist = own.grandparentRatingKey ?: return emptyList()
-        // A station hands out a few songs at a time — five, on the server this
-        // was checked against — and expects the client to report its position
-        // and be topped up as it plays. This client reads once, so it asks a
-        // few times instead: every ask mints a fresh station (the key's uuid
-        // differs each time) with a fresh handful, merged here until there is
-        // enough for a radio or an ask brings nothing new.
+        // A station returns a small batch and expects position reports to
+        // refill it. This client doesn't report position, so it asks
+        // repeatedly (each ask mints a fresh station) and merges the results.
         val merged = LinkedHashMap<String, Track>()
         for (ask in 1..STATION_ASKS) {
             val answer = runCatching { stationTracks(artist, "artist") }
@@ -366,9 +317,8 @@ class PlexClient(
             android.util.Log.w(RADIO_TAG, "plex: no machine identifier, can't build the queue")
             return StationAnswer(grandparentRatingKey = artistKey)
         }
-        // Read once rather than followed: `continuous` keeps Plex topping the
-        // queue up for clients that report their position back, and this one
-        // doesn't.
+        // `continuous` would let Plex keep refilling the queue, but only for
+        // clients that report position back; this one reads once instead.
         val queueText = rawPost(
             "/playQueues",
             listOf(
@@ -388,8 +338,6 @@ class PlexClient(
             "plex $what station queue $queueId: ${tracks.size} tracks, " +
                 "total=${findString(queueTree, "playQueueTotalCount")}",
         )
-        // Checked once, logged: whether re-reading a continuous queue with a
-        // wide window is what makes Plex generate more of it.
         if (queueId != null) {
             val wider = runCatching {
                 fetch("/playQueues/$queueId", listOf("window" to "100", "includeChapters" to "0"))
@@ -401,7 +349,7 @@ class PlexClient(
         return StationAnswer(tracks, artistKey)
     }
 
-    /** Sonically nearest tracks — python-plexapi's `sonicallySimilar`. */
+    /** Sonically nearest tracks, python-plexapi's `sonicallySimilar`. */
     private suspend fun nearestTracks(ratingKey: String, limit: Int): List<Track> =
         fetch("/library/metadata/$ratingKey/nearest", listOf("limit" to limit.toString()))
             .container.metadata.filter { it.type == "track" }.map { it.toTrack() }
@@ -435,32 +383,25 @@ class PlexClient(
     // --- Media ---------------------------------------------------------------
 
     /**
-     * Plex's universal transcoder, which takes a metadata key rather than a file
-     * — so this stays synchronous, with no lookup of the part id first.
+     * Plex's universal transcoder, keyed by metadata id rather than a file
+     * path. `offset` seeds the transcode that many seconds in.
      *
-     * `offset` is the same trick the Subsonic path uses for seeking inside a
-     * transcode: the stream starts that many seconds in.
+     * Doesn't serve original quality (see the [Track] overload): a
+     * direct-play request here still returns the original bytes behind a
+     * `.mp3` URL, misleading anything that sniffs the extension instead of
+     * the content type.
      *
-     * Original quality is *not* served from here — see the [Track] overload. By
-     * id alone there is no way to name the file, and asking the transcoder to
-     * direct-play it returns the original bytes behind an `.mp3` URL, which is a
-     * lie that anything sniffing the extension rather than the content type
-     * (a UPnP renderer, say) will believe.
-     *
-     * **Everything this endpoint transcodes, it transcodes to MP3.** The name is
-     * not decoration: ask for FLAC here and MP3 comes back, with nothing in the
-     * response to say so. That is why [MusicSource.streamFormats] offers a Plex
-     * source only the original file and MP3 — the formats it cannot serve are
-     * absent rather than silently swapped.
+     * This endpoint always transcodes to MP3, regardless of the requested
+     * format. [MusicSource.streamFormats] offers a Plex source only the
+     * original file and MP3 for this reason.
      */
     override suspend fun prepareStream(
         songId: String,
         format: StreamFormat,
         sessionId: String?,
     ): Boolean {
-        // Nothing to decide without a session to decide for: the stream URL
-        // leaves the identifier off in that case too, and Plex only enforces
-        // this against sessions it is tracking.
+        // A blank sessionId skips the decision call, since Plex only
+        // enforces this against sessions it's tracking.
         if (sessionId.isNullOrBlank()) return true
         return sendChecked("/music/:/transcode/universal/decision", transcodeParams(songId, format, 0, sessionId))
     }
@@ -478,12 +419,9 @@ class PlexClient(
     }
 
     /**
-     * What a transcode request is made of — asked for twice, and the two have to
-     * match.
-     *
-     * [prepareStream] settles the decision for a session and the stream then
-     * claims it, so anything that differs between the two describes a different
-     * playback and leaves the stream without a decision of its own.
+     * Transcode request parameters. Must match between [prepareStream] and
+     * the stream URL; any difference describes a different playback, leaving
+     * the stream without a matching decision.
      */
     private fun transcodeParams(
         songId: String,
@@ -502,13 +440,10 @@ class PlexClient(
             add("hasMDE" to "1")
             if (timeOffsetSeconds > 0) add("offset" to timeOffsetSeconds.toString())
             format.maxBitRate?.let { add("musicBitrate" to it.toString()) }
-            // Not shared across calls: Plex keeps one transcode per identifier
-            // and tears down the previous holder of it, so the same id on a
-            // download in flight and the stream that is playing would have the
-            // second one kill the first — the server answers 400 and playback
-            // stops dead. The caller is expected to mint a fresh one per
-            // playback (see PlaybackController) and never reuse it for a
-            // download, which is why this is left out unless given one.
+            // Plex tears down the previous holder of a transcode identifier,
+            // so reusing a session id (e.g. for a concurrent download) kills
+            // the other playback with a 400. Callers must mint a fresh id per
+            // playback (see PlaybackController).
             if (!sessionId.isNullOrBlank()) add("X-Plex-Session-Identifier" to sessionId)
             add("X-Plex-Token" to token)
             identityHeaders.forEach { (k, v) -> add(k to v) }
@@ -516,12 +451,9 @@ class PlexClient(
     }
 
     /**
-     * Original quality straight from the file, when we know where it is.
-     *
-     * The path comes back with the track's metadata and is stored on it, so this
-     * needs no extra request. Plex serves it with the real container and content
-     * type, which is what makes a FLAC arrive as a FLAC — seek table intact —
-     * instead of as something claiming to be an MP3.
+     * Original quality straight from the file, when the path is known.
+     * No transcode: Plex serves the real container and content type, so a
+     * FLAC arrives as FLAC with its seek table intact.
      */
     override fun streamUrl(
         track: Track,
@@ -533,23 +465,17 @@ class PlexClient(
         if (format != StreamFormat.RAW || track.streamPath.isBlank()) {
             return streamUrl(track.id, format, timeOffsetSeconds, estimateContentLength, sessionId)
         }
-        // The original file is served whole and direct, with no transcode
-        // session behind it to identify — nothing to attach sessionId to.
+        // Served whole and direct, with no transcode session to attach sessionId to.
         return baseUrl.trimEnd('/') + track.streamPath +
             (if (track.streamPath.contains('?')) "&" else "?") +
             "download=0&X-Plex-Token=" + enc(token)
     }
 
     /**
-     * A copy to keep, rather than a stream to play.
-     *
-     * The original needs no transcode and is already served whole, so that path
-     * is unchanged. For anything else `download=1` asks Plex's transcoder for a
-     * complete file instead of the segmented live encode `start.mp3` produces —
-     * the latter has no Xing header, so nothing downstream can know how long it
-     * is: ExoPlayer falls back to size ÷ the first frame's bitrate, and on a
-     * variable-rate encode that read a 3:07 song as 22:57 and then played
-     * silence for the difference.
+     * A copy to keep, rather than a stream to play. The original file needs
+     * no transcode. Anything else uses `download=1` to get a complete file
+     * instead of the segmented live encode `start.mp3` produces, which has
+     * no Xing header and leaves players unable to read its real duration.
      */
     override fun downloadUrl(track: Track, format: StreamFormat): String {
         if (format == StreamFormat.RAW && track.streamPath.isNotBlank()) {
@@ -561,12 +487,9 @@ class PlexClient(
     }
 
     /**
-     * Words for a song, where the library has them.
-     *
-     * Plex imports an `.lrc` sitting beside a track the way it imports a
-     * subtitle, so lyrics arrive as another stream inside the file rather than
-     * as anything lyric-shaped. Finding one costs a metadata request, because
-     * the streams aren't in the album listing the library was built from.
+     * Words for a song, where the library has them. Plex imports an `.lrc`
+     * beside a track as a subtitle stream, so lyrics require a separate
+     * metadata request to find.
      */
     override suspend fun getLyrics(songId: String): Lyrics? {
         val streams = runCatching { fetch("/library/metadata/$songId") }.getOrNull()
@@ -578,12 +501,9 @@ class PlexClient(
         } ?: return null
         val raw = runCatching {
             val response = http.get(baseUrl.trimEnd('/') + stream.key) {
-                // Not plexHeaders(): that asks for `application/json`, which is
-                // right for every endpoint that answers with a MediaContainer
-                // and wrong for this one — it serves the lyric file itself.
-                // Plex took the mismatch as nothing to serve and answered 404
-                // for every track, so a downloaded song stored no words and
-                // each download spent a request finding that out.
+                // Must send Accept: */* here, not plexHeaders()'s
+                // application/json. This endpoint serves the lyric file
+                // itself, and Plex 404s on the mismatch.
                 header("X-Plex-Token", token)
                 header("Accept", "*/*")
                 identityHeaders.forEach { (k, v) -> header(k, v) }
@@ -591,8 +511,7 @@ class PlexClient(
             if (response.status.isSuccess()) response.bodyAsText() else null
         }.getOrNull()
         if (raw.isNullOrBlank()) return null
-        // Timestamps where the file has them; otherwise it's a plain sheet, and
-        // the lines still belong on screen without the karaoke.
+        // Falls back to plain lines when the file has no timestamps.
         LyricsRepository.parseLrc(raw)?.let { return it }
         val lines = raw.split('\n').map { it.trim() }.filter { it.isNotEmpty() }
         return if (lines.isEmpty()) null else Lyrics(lines.map { LyricLine(null, it) }, synced = false)
@@ -608,14 +527,8 @@ class PlexClient(
     }
 
     /**
-     * The cover through Plex's own image resizer, which is what its clients use.
-     *
-     * The stored art is whatever the scanner found — routinely 2000px and
-     * several megabytes — and the path above serves exactly that. This asks the
-     * server to do the shrinking, which turns a page of covers from tens of
-     * megabytes into a few hundred kilobytes. `upscale=0` so a small original is
-     * left alone rather than blown up to the asked-for size and back down again
-     * on this end.
+     * The cover through Plex's own image resizer. `upscale=0` keeps a small
+     * original from being blown up and scaled back down again.
      */
     override fun coverArtUrl(coverArtId: String?, maxSizePx: Int): String? {
         if (coverArtId.isNullOrBlank()) return null
@@ -634,9 +547,8 @@ class PlexClient(
     // --- Writing back --------------------------------------------------------
 
     override suspend fun scrobble(songId: String, atMs: Long?, submission: Boolean) {
-        // Plex has no now-playing call of this shape — that job belongs to
-        // [reportTimeline], which it does understand. Marking the track played
-        // on a start notice would count everything that was skipped past.
+        // Plex's now-playing notice is [reportTimeline], not this call.
+        // Reporting a play on start would count every track skipped past.
         if (!submission) return
         send(
             "GET",
@@ -646,13 +558,9 @@ class PlexClient(
     }
 
     /**
-     * A heartbeat for whatever is watching `/status/sessions` — Plex's own
-     * dashboard, chiefly. Without this, a stream this app started is bytes
-     * moving and nothing else: Plex has no session object to hold it in, and
-     * so nothing to list as "now playing".
-     *
-     * `time`/`duration` are milliseconds, which is what `/:/timeline` wants —
-     * unlike most of this client's calls, which work in Plex's native seconds.
+     * Heartbeat for Plex's "Now Playing" view (`/status/sessions`). Without
+     * it, Plex has no session object to show. `time`/`duration` are
+     * milliseconds here, unlike most calls in this client, which use seconds.
      */
     override suspend fun reportTimeline(
         sessionId: String,
@@ -722,9 +630,8 @@ class PlexClient(
         paged("/playlists/$id/items").map { it.toTrack() }
 
     /**
-     * Plex has no call for an empty playlist: creating one means naming its
-     * contents, and a request without a `uri` is refused. The songs therefore
-     * go in here rather than in a second pass — see [MusicServer.createPlaylist].
+     * Plex has no call for an empty playlist; a request needs a `uri` naming
+     * its contents. See [MusicServer.createPlaylist].
      */
     override suspend fun createPlaylist(name: String, songIds: List<String>): String? {
         if (songIds.isEmpty()) return null
@@ -755,10 +662,8 @@ class PlexClient(
     }
 
     /**
-     * Plex removes a playlist entry by its own id, not the song's — the same
-     * song can appear twice and only one of them is meant. The position given is
-     * an index into the playlist as the app last read it, so the entry ids are
-     * re-read here rather than remembered.
+     * Removes by playlist entry id, not song id, since the same song can
+     * appear twice. Entry ids are re-read on each call rather than cached.
      */
     override suspend fun removeFromPlaylistAt(id: String, index: Int) {
         val entry = playlistItemIds(id).getOrNull(index) ?: return
@@ -766,12 +671,9 @@ class PlexClient(
     }
 
     /**
-     * Reordering is a sequence of moves: Plex will put one entry after another,
-     * and has no call that takes a whole new running order.
-     *
-     * Walking the wanted order and moving each entry behind the one before it
-     * settles the list in a single pass, and skipping the entries already in
-     * place keeps a small change to a small number of requests.
+     * Plex can only move one entry after another; there's no call to set a
+     * whole order at once. Walks the target order and moves each entry into
+     * place, skipping entries already correct.
      */
     override suspend fun reorderPlaylist(id: String, orderedSongIds: List<String>) {
         val entries = playlistEntries(id)
@@ -825,8 +727,8 @@ class PlexClient(
         year = year,
         releaseDate = originallyAvailableAt?.replace("-", "")?.toLongOrNull() ?: 0L,
         createdMs = (addedAt ?: 0L) * 1000L,
-        // Plex leaves leafCount off this listing, so this is the only
-        // thing that says an album changed. Seconds on the wire.
+        // Plex omits leafCount from this listing, so updatedAt (seconds on
+        // the wire) is the only signal that an album changed.
         updatedMs = (updatedAt ?: 0L) * 1000L,
         playCount = viewCount ?: 0,
         lastPlayedMs = (lastViewedAt ?: 0L) * 1000L,
@@ -834,34 +736,29 @@ class PlexClient(
         genre = genres.firstOrNull()?.tag.orEmpty(),
     )
 
-    // --- Plex Companion — casting to another Plex player ---------------------
+    // --- Plex Companion: casting to another Plex player -----------------------
     //
-    // Companion is Plex's own remote-control protocol: any signed-in player
-    // that stays connected to the server (the Apple TV app among them) accepts
-    // `/player/...` commands relayed *through the server* — the same proxy
-    // route the official controllers use, so this phone never needs to reach
-    // the player directly. The player then pulls the audio from the server
-    // itself; Amp only steers. Unlike a DLNA renderer, a Plex player holds the
-    // whole play queue and advances through it on its own.
+    // Companion is Plex's remote-control protocol: a connected player accepts
+    // `/player/...` commands relayed through the server and pulls the audio
+    // from the server itself; Amp only steers. Unlike a DLNA renderer, a Plex
+    // player holds the whole play queue and advances through it on its own.
     //
-    // These endpoints answer XML even where the rest of the server speaks
-    // JSON — the proxied replies come from the player — so they go through
-    // [companionXml] and the attribute parser at the bottom of this file.
+    // These endpoints answer XML, unlike the rest of the server, so they go
+    // through [companionXml] and the attribute parser at the bottom of this file.
 
     /**
-     * Companion-capable players, from two lists because no one list has
-     * everyone: the server's `/clients` only knows players it discovered on
-     * its own LAN, and the Apple TV app is famously not among them — it
-     * announces itself to plex.tv instead. The account's resources cover
-     * those; the token here is the account's, so both are ours to ask. The
-     * server relays commands to either kind the same way.
+     * Companion-capable players, from two lists since neither has everyone:
+     * the server's `/clients` only knows players discovered on its own LAN
+     * (missing, e.g., the Apple TV app, which registers with plex.tv
+     * instead). The account's resources cover those. The server relays
+     * commands to either kind the same way.
      */
     suspend fun companionPlayers(): List<PlexPlayer> {
         val fromServer = runCatching {
             plexXmlElements(companionXml("/clients"), "Server").mapNotNull { attrs ->
                 val id = attrs["machineIdentifier"] ?: return@mapNotNull null
-                // Entries that can't take playback commands are controllers or
-                // servers — not somewhere sound can go.
+                // Entries that can't take playback commands are controllers
+                // or servers, not somewhere sound can go.
                 if (!(attrs["protocolCapabilities"] ?: "").contains("playback")) return@mapNotNull null
                 // The server's list names the player's own address and
                 // Companion port; commands go there, not back through here.
@@ -892,11 +789,8 @@ class PlexClient(
                 },
             )
             players
-                // Deliberately not filtered on plex.tv's `presence`: it goes
-                // stale — an Apple TV that slept and woke reads as absent while
-                // sitting there playing. What decides is an address to reach it
-                // at; a player that answers nothing simply fails to take the
-                // cast, which is visible, unlike a device missing from a list.
+                // Not filtered on plex.tv's `presence`, which can go stale.
+                // Reachability is decided by whether an address answers.
                 .mapNotNull { resource ->
                     // The local address first: this Wi-Fi, plain http, no
                     // round trip through Plex's relay. A player with no
@@ -936,13 +830,13 @@ class PlexClient(
     suspend fun createPlayQueue(trackIds: List<String>, startId: String, repeatAll: Boolean): PlexQueue? = runCatching {
         val mid = machineIdentifier.ifBlank { identity().orEmpty() }
         if (mid.isBlank()) {
-            android.util.Log.i("AmpPlex", "no machine identifier — the server can't be named in a queue uri")
+            android.util.Log.i("AmpPlex", "no machine identifier - the server can't be named in a queue uri")
             return@runCatching null
         }
         android.util.Log.i("AmpPlex", "building a queue of ${trackIds.size} on $mid, starting at $startId")
-        // A queue is built out of this server's own rating keys. Ids from
-        // another source — a queue left over from Navidrome — name nothing
-        // here, and the server rejects the lot with no hint which it was.
+        // A queue is built from this server's own rating keys. Ids from
+        // another source name nothing here, and the server rejects the
+        // whole batch without saying which id was bad.
         val alien = trackIds.filterNot { it.all(Char::isDigit) }
         if (alien.isNotEmpty()) {
             android.util.Log.i(
@@ -986,12 +880,10 @@ class PlexClient(
     }
 
     /**
-     * Re-read a queue, asking for [window] items around the current one.
-     *
-     * An edit's own answer carries only as much of the queue as Plex feels
-     * like returning, and an item whose place we don't know can't be moved or
-     * removed — which is a queue edit silently becoming a re-push. Asking
-     * plainly for the window we pushed keeps the places we need.
+     * Re-reads a queue, asking for [window] items around the current one.
+     * An edit's response carries only part of the queue, and an item whose
+     * place isn't known can't be moved or removed. This asks for the full
+     * pushed window to recover the places needed.
      */
     suspend fun readPlayQueue(queue: PlexQueue, window: Int): PlexQueue? = runCatching {
         queueFrom(
@@ -1006,8 +898,8 @@ class PlexClient(
     }
 
     /**
-     * Move a track's place so it follows [afterTrackId] — or to the front when
-     * that is null. The server answers with the queue as it now stands.
+     * Moves a track so it follows [afterTrackId], or to the front if null.
+     * The server returns the queue as it now stands.
      */
     suspend fun movePlayQueueItem(queue: PlexQueue, trackId: String, afterTrackId: String?): PlexQueue? = runCatching {
         val place = queue.items[trackId] ?: return@runCatching null
@@ -1061,11 +953,9 @@ class PlexClient(
 
     /**
      * Whether the player at this address really is the one we mean.
-     *
-     * An address is not an identity. A device listed by plex.tv is named by
-     * whatever connection the account has on file, and a DHCP lease that moved
-     * would have us commanding whatever answers there now. GDM replies carry
-     * their own identity, so this is for the ones that don't.
+     * An address isn't a stable identity: a DHCP lease can move, pointing
+     * this at whatever answers there now. GDM replies carry their own
+     * identity; this check is for the ones that don't.
      */
     suspend fun playerIsWhoWeThink(target: PlexPlayer): Boolean = runCatching {
         val reported = plexXmlElements(companionXml("/resources", target = target), "Player")
@@ -1085,11 +975,8 @@ class PlexClient(
     }
 
     /**
-     * Ask [target] to push its timeline to us at [port] instead of being asked
-     * every second.
-     *
-     * The protocol's own answer to polling, and the reason a controller has an
-     * HTTP server in it — see [PlexCompanionListener]. Polling remains the
+     * Asks [target] to push its timeline to [port] instead of being polled
+     * every second. See [PlexCompanionListener]. Polling remains the
      * fallback for a player that won't subscribe.
      */
     suspend fun companionSubscribe(target: PlexPlayer, port: Int, commandId: Int): Boolean = runCatching {
@@ -1154,12 +1041,10 @@ class PlexClient(
     }
 
     /**
-     * Jump to a track *within the queue the player already holds*.
-     *
-     * Not [companionPlay]: that hands the player a queue to go and fetch, and
-     * a player pulling a hundred-item container back over the WAN takes long
-     * enough that the command times out — which is what tapping a queue row
-     * used to do. `skipTo` moves inside what it has.
+     * Jumps to a track within the queue the player already holds.
+     * Unlike [companionPlay], which hands over a queue to fetch, this moves
+     * inside what the player already has, avoiding a WAN refetch that can
+     * time out.
      */
     suspend fun companionSkipTo(target: PlexPlayer, trackId: String, commandId: Int): Boolean = runCatching {
         companionXml(
@@ -1199,7 +1084,7 @@ class PlexClient(
         true
     }.getOrDefault(false)
 
-    /** `volume` 0–100 and/or `repeat` 0 off / 1 track / 2 queue — the player keeps what it understands. */
+    /** `volume` 0-100 and/or `repeat` 0 off / 1 track / 2 queue. The player keeps what it understands. */
     suspend fun companionSetParameters(target: PlexPlayer, params: List<Pair<String, String>>, commandId: Int): Boolean =
         runCatching {
             companionXml(
@@ -1222,15 +1107,13 @@ class PlexClient(
     }.getOrNull()
 
     /**
-     * A Companion request: to the player itself when one is named, to the
-     * server otherwise (the client list and play queues are the server's).
-     */
-    /**
-     * @param inBody send the parameters as a form body rather than a query.
-     *   A play queue names every track in one `uri`, and percent-encoded that
-     *   is kilobytes for a long queue — enough for a reverse proxy in front of
-     *   the server to answer 400 before Plex ever sees it. A body has no such
-     *   ceiling, and is what a payload that size should have been all along.
+     * A Companion request: to the player when one is named, to the server
+     * otherwise (the client list and play queues are the server's).
+     *
+     * @param inBody Sends parameters as a form body instead of a query
+     *   string. A play queue's `uri` can list many tracks, and percent-encoded
+     *   that can be large enough for a reverse proxy to reject the request
+     *   before Plex ever sees it.
      */
     private suspend fun companionXml(
         path: String,
@@ -1251,9 +1134,8 @@ class PlexClient(
                 setBody(encoded)
             }
         }
-        // A player answers one caller at a time. The poll runs every second, so
-        // without this a command lands on top of it, the socket wedges, and
-        // enough of those in a row take the player down altogether.
+        // A player answers one caller at a time. The poll runs every second,
+        // so without this lock, overlapping requests wedge the socket.
         val response = if (target != null) {
             playerLock.withLock {
                 when {
@@ -1272,8 +1154,7 @@ class PlexClient(
             }
         }
         if (!response.status.isSuccess()) {
-            // The server explains itself in the body, and throwing that away is
-            // how a 400 stayed a mystery through three guesses.
+            // Captured for the exception message; a 400 with no detail is hard to diagnose.
             val why = runCatching { response.bodyAsText() }.getOrDefault("").take(300).replace('\n', ' ')
             throw PlexException("Plex says ${response.status.value} for $path at $host — $why")
         }
@@ -1304,9 +1185,8 @@ class PlexClient(
         album = parentTitle ?: "Unknown Album",
         albumArtist = grandparentTitle ?: "Unknown Artist",
         albumId = parentRatingKey,
-        // The album's sleeve first: a track's own thumb is usually that very
-        // path, and where a file carries its own art it is still the same
-        // picture — keyed by the album it is cached once, not once per song.
+        // The album's own thumb first: a track's thumb is usually the same
+        // path, so keying the cache by album avoids caching it once per song.
         coverArtId = parentThumb ?: thumb,
         durationMs = duration ?: 0L,
         trackNumber = index,
@@ -1338,10 +1218,8 @@ class PlexClient(
         private const val STATION_ASKS = 5
 
         /**
-         * The original file, or MP3. Plex's universal music transcoder produces
-         * MP3 and nothing else — the endpoint is `start.mp3`, and asking it for
-         * FLAC returns MP3 with nothing in the response to admit it. Handing over
-         * the untouched file is the better answer for "lossless" anyway.
+         * The original file, or MP3. Plex's universal music transcoder
+         * (`start.mp3`) always produces MP3, so no other transcoded format is offered.
          */
         val STREAM_FORMATS: List<StreamFormat> = listOf(StreamFormat.RAW, StreamFormat.MP3)
 
@@ -1361,16 +1239,12 @@ class PlexClient(
         private const val LYRIC_STREAM = 4
 
         /**
-         * Who we say we are. Plex wants these on every request, and uses the
-         * client identifier to tie a token to a device — it must be stable, so
-         * it is the app's own id rather than something generated per launch.
-         *
-         * [product] overrides `X-Plex-Product`, the player's own name, which is
-         * what Plex shows a session as; null keeps the app's. `X-Plex-Device`
-         * deliberately stays the hardware: a source name is set per source, and
-         * two sources configured here are still the same phone — so naming the
-         * device after one of them would make Plex read "Kitchen on Kitchen"
-         * and lose which machine it was talking to.
+         * Identity headers sent on every request. The client identifier ties
+         * a token to a device, so it's the app's own fixed id, not something
+         * generated per launch. [product] overrides `X-Plex-Product` (the
+         * name Plex shows a session as). `X-Plex-Device` stays the hardware
+         * name regardless of per-source naming, so Plex can still tell
+         * devices apart.
          */
         private const val PLEX_TV_RESOURCES = "https://plex.tv/api/v2/resources?includeHttps=1"
 
@@ -1385,10 +1259,8 @@ class PlexClient(
             "X-Plex-Product" to (product ?: "Amp"),
             "X-Plex-Version" to "1.0.0",
             "X-Plex-Device" to "Light Phone III",
-            // A different field from the one above: this is the *friendly* name,
-            // and it is what Plex prints as a session's "Player". Missing, Plex
-            // falls back to the product — so a session read "Amp / Amp", the
-            // app's name twice with no sign of which phone was playing.
+            // The friendly name, shown as a session's "Player" in Plex. If
+            // missing, Plex falls back to the product name instead.
             "X-Plex-Device-Name" to "Light Phone III",
             "X-Plex-Platform" to "Android",
         )
@@ -1399,47 +1271,38 @@ class PlexException(message: String) : Exception(message)
 
 /**
  * A Companion-capable player, from the server's list or the account's.
- *
- * Commands go to [directUrl] — the player's own Companion port — and never
- * through the server. Relaying was tried first, because that is what the
- * official controllers appear to do, and the server answers **404** for a
- * player it has not discovered itself: the Apple TV app registers with plex.tv
- * rather than announcing itself on the server's LAN, so the server has no such
- * player to relay to. Rather than keep a fallback that has never worked, a
- * player is listed only when it can be reached directly.
+ * Commands go to [directUrl] directly, never through the server: the server
+ * 404s for a player it hasn't discovered on its own LAN (e.g. an Apple TV
+ * registered via plex.tv instead). A player is listed only when reachable directly.
  */
 data class PlexPlayer(
-    /** The player's own client identifier — the command target. */
+    /** The player's own client identifier, the command target. */
     val id: String,
     val name: String,
     val product: String,
-    /** `http://host:32500` — the player's own door. */
+    /** `http://host:32500`, the player's own address. */
     val directUrl: String,
     /**
-     * Whether the device at [directUrl] said who it was.
-     *
-     * True for GDM (the reply carries its identity) and for the server's own
-     * client list (the server discovered it). False for a device named only by
-     * plex.tv, whose address is whatever the account has on file — that one is
-     * asked before it is handed any audio.
+     * Whether the device at [directUrl] confirmed its own identity.
+     * True for GDM replies and the server's own client list. False for a
+     * device known only via plex.tv, whose address may be stale.
      */
     val identityKnown: Boolean = false,
 )
 
 /**
  * A server-side play queue.
- *
- * [items] maps a track id to its *place* in this queue (`playQueueItemID`),
- * which is what the edit endpoints address — the same track appearing twice
- * has two of them, so the queue is edited by place, not by song.
+ * [items] maps a track id to its place in the queue (`playQueueItemID`),
+ * which the edit endpoints address by. The same track can appear twice, so
+ * edits target place, not song id.
  */
 data class PlexQueue(
     val id: String,
     val items: Map<String, String> = emptyMap(),
     /**
-     * The queue's version, which Plex bumps on every edit. Sent with a refresh
-     * so a player re-reads the version we mean rather than whichever it
-     * happens to fetch — two edits in quick succession are otherwise a race.
+     * The queue's version, bumped by Plex on every edit. Sent with a
+     * refresh so the player re-reads the intended version instead of
+     * racing a concurrent edit.
      */
     val version: String? = null,
 )
@@ -1450,27 +1313,24 @@ data class PlexPlayerTimeline(
     val state: String,
     val timeMs: Long,
     val durationMs: Long,
-    /** The playing track, in the server's terms — Amp's Plex track id. */
+    /** The playing track, in the server's terms: Amp's Plex track id. */
     val ratingKey: String?,
-    /** 0–100 where the player reports one; null where volume isn't its to control. */
+    /** 0-100 where the player reports one; null where volume isn't its to control. */
     val volume: Int?,
     /** The player's repeat: 0 off, 1 the track, 2 the queue. Null when unsaid. */
     val repeat: Int?,
     /** Whether the player is shuffling. Null when unsaid. */
     val shuffle: Boolean?,
     /**
-     * What the player says it accepts — `playPause,stop,volume,seekTo,…` —
-     * or null where it doesn't say. The player's own word on its capabilities,
-     * which beats guessing from what a number does after we push it.
+     * What the player says it accepts (e.g. `playPause,stop,volume,seekTo`),
+     * or null if unsaid.
      */
     val controllable: String?,
 )
 
 /**
- * The attributes of every `<tag …>` in [xml], in document order.
- *
- * Companion bodies are flat attribute lists — the shape DlnaCast already
- * parses by hand for UPnP — so a full XML parser buys nothing here.
+ * The attributes of every `<tag ...>` in [xml], in document order.
+ * Companion bodies are flat attribute lists, so a full XML parser isn't needed.
  */
 internal fun plexXmlElements(xml: String, tag: String): List<Map<String, String>> {
     val out = mutableListOf<Map<String, String>>()

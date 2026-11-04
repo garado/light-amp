@@ -12,17 +12,8 @@ import java.util.concurrent.ConcurrentHashMap
 import kotlinx.serialization.json.Json
 
 /**
- * Where lyrics come from, and which copy wins.
- *
- * Navidrome only returns timed lyrics when the file itself carries them, and this
- * library's files mostly don't — so `getLyricsBySongId` answers with plain text
- * and there is nothing for the karaoke view to highlight. The old React Native
- * app solved this by falling back to lrclib.net for timed lyrics; this is the
- * same strategy, in the same order.
- *
- * Synced always wins, whichever side it comes from. lrclib is only asked when the
- * server didn't already provide timed lyrics, so the common case costs no extra
- * request.
+ * Falls back to lrclib.net for timed lyrics when the server doesn't provide any.
+ * A synced result always wins over plain text, regardless of source.
  */
 object LyricsRepository {
 
@@ -32,11 +23,7 @@ object LyricsRepository {
     private val http by lazy { HttpClient(OkHttp) { expectSuccess = false } }
     private val json = Json { ignoreUnknownKeys = true }
 
-    /**
-     * What a lookup found. [Unavailable] is not [None]: the difference is whether
-     * we know there are no lyrics or only that we couldn't ask, and conflating
-     * them is what makes a track that failed once look permanently wordless.
-     */
+    /** [Unavailable] means the lookup failed; [None] means it succeeded and found nothing. */
     sealed interface Outcome {
         data class Found(val lyrics: Lyrics) : Outcome
         data object None : Outcome
@@ -46,14 +33,10 @@ object LyricsRepository {
         data object NotFetched : Outcome
     }
 
-    /** Settled answers only — a failed lookup is never remembered. */
+    /** Settled answers only. A failed lookup is never remembered. */
     private val cache = ConcurrentHashMap<String, Outcome>()
 
-    /**
-     * [allowNetwork] is the caller's answer to "may this spend data" — see
-     * App.metadataAllowed. False still returns anything downloaded with the
-     * song; it only stops the two lookups that would go out and ask.
-     */
+    /** When [allowNetwork] is false, only lyrics already downloaded with the track are used. */
     suspend fun forTrack(
         track: Track,
         client: MusicServer?,
@@ -61,8 +44,7 @@ object LyricsRepository {
     ): Outcome {
         cache[track.id]?.let { return it }
         val resolved = resolve(track, client, allowNetwork)
-        // Neither of these is a settled answer: one is an outage, the other is
-        // a question never asked. Remembering either would outlive its reason.
+        // Unavailable and NotFetched aren't settled answers, so they aren't cached.
         if (resolved != Outcome.Unavailable && resolved != Outcome.NotFetched) {
             cache[track.id] = resolved
         }
@@ -74,14 +56,10 @@ object LyricsRepository {
         client: MusicServer?,
         allowNetwork: Boolean,
     ): Outcome {
-        // Downloaded lyrics first: they cost nothing and work with no network.
         val cached = runCatching { App.downloader.cachedLyrics(track.id) }.getOrNull()
         val stored = parseStored(cached)
         stored?.let { if (it.synced) return Outcome.Found(it) }
 
-        // Everything past here is bytes. A mode that forbids them must not also
-        // hide the copy already on the phone — having it offline is the entire
-        // point of having downloaded it.
         if (!allowNetwork) return stored?.let { Outcome.Found(it) } ?: Outcome.NotFetched
 
         val server = runCatching { client?.getLyrics(track.id) }
@@ -92,13 +70,10 @@ object LyricsRepository {
         val fromLrclib = lrclib.getOrNull()
         if (fromLrclib?.synced == true) return Outcome.Found(fromLrclib)
 
-        // Nothing timed anywhere — take whatever plain text turned up, preferring
-        // the server's own copy.
         val plain = fromServer ?: fromLrclib ?: parseStored(cached)
         if (plain != null) return Outcome.Found(plain)
 
-        // Both lookups threw (no network, server down): say so rather than
-        // caching a "no lyrics" that would outlive the outage.
+        // If either lookup threw, this is an outage, not a confirmed absence of lyrics.
         val asked = server.isSuccess && lrclib.isSuccess
         return if (asked) Outcome.None else Outcome.Unavailable
     }
@@ -119,14 +94,13 @@ object LyricsRepository {
         return Lyrics(lines, synced = lines.all { it.timeMs != null })
     }
 
-    /** Timed lyrics from lrclib, or null — used when downloading for karaoke. */
+    /** Timed lyrics from lrclib, or null. Used when downloading for karaoke. */
     suspend fun timedFromLrclib(track: Track): Lyrics? =
         fetchLrclib(track)?.takeIf { it.synced }
 
     private suspend fun fetchLrclib(track: Track): Lyrics? {
         if (track.title.isBlank() || track.artist.isBlank()) return null
-        // get-cached is the cheap lookup; get does a full match and is the
-        // fallback, mirroring what lrclib's own clients do.
+        // get-cached is cheap; get does a full match and is the fallback.
         for (endpoint in listOf("get-cached", "get")) {
             val response = http.get("$LRCLIB/$endpoint") {
                 header("User-Agent", USER_AGENT)
@@ -153,17 +127,13 @@ object LyricsRepository {
 
     private val STORED_STAMP = Regex("""^\[(\d+)]""")
 
-    /** `[mm:ss.xx]` — one or more may prefix a single line. */
+    /** `[mm:ss.xx]`, one or more may prefix a single line. */
     private val LRC_STAMP = Regex("""\[(\d{1,2}):(\d{1,2})(?:[.:](\d{1,3}))?]""")
 
     /**
-     * Parse LRC into timed lines, or null when it carries no usable timestamps.
-     *
-     * A line may hold several stamps (a chorus repeated at different times), and
-     * each becomes its own entry. Metadata tags like `[ar:...]` don't match the
-     * time pattern and fall away. Empty-text stamps mark instrumental gaps in LRC;
-     * dropping them leaves the previous line highlighted through the gap, which is
-     * what you want on screen.
+     * Parses LRC into timed lines, or null if there are no usable timestamps.
+     * A line with multiple stamps produces one entry per stamp; empty-text stamps
+     * (instrumental gaps) are dropped.
      */
     fun parseLrc(raw: String): Lyrics? {
         val parsed = mutableListOf<LyricLine>()

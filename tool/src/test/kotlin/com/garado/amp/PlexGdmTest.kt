@@ -5,11 +5,7 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNull
 
-/**
- * GDM replies are HTTP-shaped but not HTTP, and the parser is a hand-rolled
- * header scan — the part worth pinning down, since a device that fails to
- * parse is a device that silently isn't there.
- */
+/** GDM replies are HTTP-shaped but not HTTP; parsed with a hand-rolled header scan. */
 class PlexGdmTest {
 
     private val appleTv = """

@@ -26,15 +26,11 @@ class PlaylistActionsScreen(
     sealed: SealedLightActivity,
     private val playlistId: String,
     private val playlistName: String,
-    /**
-     * Opened from the playlist's own page rather than its row in a list.
-     * Delete then has to unwind past that page — going back one level would
-     * land on the page of a playlist that no longer exists.
-     */
+    /** True when opened from the playlist's detail page; delete must pop to root, not just back. */
     private val fromDetail: Boolean = false,
 ) : SimpleLightScreen<Unit>(sealed) {
 
-    // While casting, the rocker belongs to the speaker — see handleVolumeKey.
+    // While casting, the rocker belongs to the speaker, see handleVolumeKey.
     override fun onKeyDown(keyCode: Int, event: KeyEvent): Boolean =
         App.playback.handleVolumeKey(keyCode) || super.onKeyDown(keyCode, event)
 
@@ -49,10 +45,7 @@ class PlaylistActionsScreen(
         val list = tracks ?: emptyList()
         val downloadedIds by App.library.downloadedTrackIds.collectAsState()
         val fullyDownloaded = list.isNotEmpty() && list.all { it.id in downloadedIds }
-        // Plex's smart playlists are real objects on the server, so Delete here
-        // would really delete one — and Plex builds their contents from a
-        // filter, so renaming is the only thing it would even accept. Neither
-        // is offered: see Playlist.readOnly.
+        // Plex smart playlists can't be renamed or deleted from here; see Playlist.readOnly.
         val readOnly = App.library.playlists.collectAsState().value
             .firstOrNull { it.id == playlistId }?.readOnly == true
         val kind = if (readOnly) "Smart playlist" else "Playlist"

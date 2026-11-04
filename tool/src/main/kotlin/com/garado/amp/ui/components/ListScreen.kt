@@ -30,8 +30,7 @@ fun ListScreen(
             AppHeader(
                 onBack = onBack,
                 title = if (subtitle == null) title else null,
-                // The same two-line card the player wears, so opening a sheet
-                // from it doesn't restate the track at a slightly different size.
+                // Uses the player's own two-line title card.
                 titleContent = if (subtitle != null) {
                     { TitleCard(title, subtitle) }
                 } else {
@@ -46,12 +45,8 @@ fun ListScreen(
 
 /**
  * The body of an action sheet: rows that scroll once there are more than fit.
- *
- * These menus are built from conditionals — a track that is in the queue, on a
- * server with playlists and ratings, and already downloaded shows several rows
- * more than one that isn't — so their height depends on the item. A plain
- * Column clips whatever falls past the bottom of the screen and gives no way to
- * reach it, which on the longest menus hides a real action.
+ * Row count varies by item, so a plain Column could clip actions off the
+ * bottom with no way to reach them.
  */
 @Composable
 fun ActionList(content: @Composable ColumnScope.() -> Unit) {
@@ -64,8 +59,7 @@ fun ActionList(content: @Composable ColumnScope.() -> Unit) {
                 .padding(end = px(SCROLLBAR_LANE_PX)),
             content = content,
         )
-        // Same bar as the lists, so a sheet long enough to scroll says so the
-        // way everything else does — see rememberScrollTarget(ScrollState).
+        // Same scroll bar used by lists; see rememberScrollTarget(ScrollState).
         ListScrollBar(rememberScrollTarget(state))
     }
 }

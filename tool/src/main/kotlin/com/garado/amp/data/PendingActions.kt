@@ -9,14 +9,13 @@ import kotlinx.serialization.json.Json
 
 /**
  * Something the user did that the server hasn't been told about yet.
- *
- * [atMs] is when it happened, not when it is sent — a scrobble replayed after a
- * week offline should land in history where it belongs.
+ * [atMs] is when it happened, not when it's sent, so a scrobble replayed
+ * later lands in history at the right time.
  */
 @Serializable
 data class PendingAction(
     val kind: Kind,
-    /** Song id, album id, or artist *name* — artists are keyed by name here. */
+    /** Song id, album id, or artist name. Artists are keyed by name here. */
     val id: String,
     /** Stars for [Kind.RATE]; unused otherwise. */
     val value: Int = 0,
@@ -37,18 +36,11 @@ data class PendingAction(
 }
 
 /**
- * Plays, likes and ratings made while the server was out of reach, kept until it
- * comes back.
- *
- * The local database is the immediate truth — a like shows as liked the instant
- * it is tapped, offline or not — and this is the record of what still has to be
- * mirrored outward. Held in preferences rather than a table so adding it needs no
- * schema change, which on this app's destructive-migration setup would cost the
- * user their whole library cache.
- *
- * Order is preserved and replay stops at the first failure, so a queue that ends
- * "star, unstar, star" can never be applied out of order and leave the server
- * disagreeing with the phone.
+ * Plays, likes, and ratings made while the server was unreachable, queued
+ * until it comes back. Stored in preferences rather than a database table, to
+ * avoid a schema migration (which would wipe the library cache on this app's
+ * destructive-migration setup). Replay preserves order and stops at the first
+ * failure.
  */
 class PendingActions(private val settings: AppSettings) {
 
@@ -57,7 +49,7 @@ class PendingActions(private val settings: AppSettings) {
 
     private val _count = MutableStateFlow(0)
 
-    /** How many actions are waiting — surfaced in Settings. */
+    /** How many actions are waiting. Surfaced in Settings. */
     val count: StateFlow<Int> = _count
 
     suspend fun load(): List<PendingAction> = decode(settings.pendingActions())
@@ -69,9 +61,7 @@ class PendingActions(private val settings: AppSettings) {
 
     suspend fun add(action: PendingAction) = lock.withLock {
         val queue = decode(settings.pendingActions()).toMutableList()
-        // A rating or a like replaces the last one for the same thing: only the
-        // final state matters, and a long offline session shouldn't send a
-        // hundred requests to arrive at it. Plays are never collapsed.
+        // A rating or like replaces the previous one for the same id. Scrobbles are never collapsed.
         if (action.kind != PendingAction.Kind.SCROBBLE) {
             queue.removeAll { it.supersededBy(action) }
         }
@@ -82,14 +72,10 @@ class PendingActions(private val settings: AppSettings) {
     }
 
     /**
-     * Send everything waiting, oldest first.
-     *
-     * Stops at the first failure and keeps the rest — the server is presumably
-     * still unreachable, and draining into a void would lose the lot. The one
-     * exception is a server error naming the specific id gone (Subsonic code
-     * 70, "data not found") — that's not the server being unreachable, it's
-     * this one row being stale, and treating it the same way would wedge
-     * every action behind it forever.
+     * Sends everything waiting, oldest first. Stops at the first failure.
+     * Exception: Subsonic error code 70 ("data not found") means this one row
+     * is stale, not that the server is unreachable, so it's dropped instead
+     * of blocking the rest of the queue.
      */
     suspend fun flush(client: MusicServer, artistId: suspend (String) -> String?): Int =
         lock.withLock {
@@ -124,8 +110,7 @@ class PendingActions(private val settings: AppSettings) {
             PendingAction.Kind.UNSTAR_SONG -> client.unstarSong(action.id)
             PendingAction.Kind.STAR_ALBUM -> client.starAlbum(action.id)
             PendingAction.Kind.UNSTAR_ALBUM -> client.unstarAlbum(action.id)
-            // An artist the server doesn't know by that name is dropped rather
-            // than retried forever; the like still stands locally.
+            // Dropped if the server doesn't know this artist name; the local like still stands.
             PendingAction.Kind.STAR_ARTIST -> artistId(action.id)?.let { client.starArtist(it) }
             PendingAction.Kind.UNSTAR_ARTIST -> artistId(action.id)?.let { client.unstarArtist(it) }
             PendingAction.Kind.RATE_SONG, PendingAction.Kind.RATE_ALBUM ->
@@ -153,7 +138,7 @@ class PendingActions(private val settings: AppSettings) {
     }
 
     private companion object {
-        /** Weeks of offline listening, and still nothing near a preferences limit. */
+        /** Weeks of offline queueing before this limit is reached. */
         const val MAX_QUEUED = 2_000
     }
 }

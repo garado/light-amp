@@ -53,11 +53,8 @@ class BootViewModel : LightViewModel<Unit>() {
     fun closeSearch() = LibraryNav.closeSearch()
 
     /**
-     * Login is only for a first source, not for a missing *server*.
-     *
-     * Keyed on the source rather than on the connection: the phone's own music
-     * has no server behind it, so a config-shaped test sent anyone who selected
-     * Local Music straight back to the login form.
+     * Keyed on the active source, not the connection. Local Music has no
+     * server behind it, so a connection check would always force login.
      */
     val bootState: StateFlow<BootState> = App.settings.activeSource
         .map { if (it == null) BootState.NeedsLogin else BootState.Ready }
@@ -80,8 +77,7 @@ class BootScreen(sealed: SealedLightActivity) : LightScreen<Unit, BootViewModel>
 
     override fun createViewModel(): BootViewModel = BootViewModel()
 
-    // The library is where the rocker is usually pressed, so the root screen
-    // forwards it too — see PlaybackController.handleVolumeKey.
+    // Forwards the volume rocker. See PlaybackController.handleVolumeKey.
     override fun onKeyDown(keyCode: Int, event: KeyEvent): Boolean =
         App.playback.handleVolumeKey(keyCode) || super.onKeyDown(keyCode, event)
 
@@ -114,19 +110,15 @@ class BootScreen(sealed: SealedLightActivity) : LightScreen<Unit, BootViewModel>
             )
             BootState.Ready -> {
                 val tab by viewModel.currentTab.collectAsState()
-                // Reopen where the app was left: one of the bar's three
-                // destinations, never the page beneath it — see LastSection.
-                // Once per run, guarded by LibraryNav, because this composable
-                // re-enters every time a pushed screen pops off it.
+                // Runs once per app run, guarded by LibraryNav.claimFirstLanding,
+                // since this composable re-enters every time a pushed screen pops.
                 LaunchedEffect(Unit) {
                     if (!LibraryNav.claimFirstLanding()) return@LaunchedEffect
                     when (App.settings.lastSection.first()) {
                         LastSection.SEARCH -> LibraryNav.openSearch()
                         LastSection.NOW_PLAYING -> {
-                            // The queue is restored asynchronously, so wait a
-                            // moment for it rather than opening a player with
-                            // nothing in it. If nothing arrives, the library is
-                            // the honest place to land.
+                            // The queue restores asynchronously. Fall back to the
+                            // library if it doesn't arrive in time.
                             val track = withTimeoutOrNull(RESTORE_PLAYER_MS) {
                                 App.playback.currentTrack.filterNotNull().first()
                             }
@@ -138,9 +130,8 @@ class BootScreen(sealed: SealedLightActivity) : LightScreen<Unit, BootViewModel>
                 val libraryIndex by LibraryNav.libraryIndex.collectAsState()
                 val searchActive by viewModel.searchActive.collectAsState()
                 val searchQuery by viewModel.searchQuery.collectAsState()
-                // The SDK's full-screen editor, which is what Simplified uses
-                // for search — see the actions below. A local rather than a
-                // ShellActions member because two of them open the same thing.
+                // Shared by two of the actions below, so it's local rather than a
+                // ShellActions member.
                 val openSearchEditor: (String) -> Unit = { current ->
                     navigateTo<String?>(
                         {
@@ -167,12 +158,8 @@ class BootScreen(sealed: SealedLightActivity) : LightScreen<Unit, BootViewModel>
                     actions = ShellActions(
                         nowPlaying = { go { NowPlayingScreen(it) } },
                         settings = { go { SettingsScreen(it) } },
-                        // Simplified gets the SDK's own full-screen editor, the
-                        // way it always did: its bar is the phone's own three
-                        // buttons, and the inline keyboard belongs to the layout
-                        // that puts a magnifier in the header. Expanded goes
-                        // straight to typing on the page itself — the list stays
-                        // underneath until something is actually typed.
+                        // Simplified uses the SDK's full-screen editor; Expanded
+                        // types inline on the page itself.
                         search = {
                             if (App.layoutMode.value == LayoutMode.SIMPLIFIED) {
                                 LibraryNav.openSearch()
@@ -181,13 +168,8 @@ class BootScreen(sealed: SealedLightActivity) : LightScreen<Unit, BootViewModel>
                                 LibraryNav.openSearch(withKeyboard = true)
                             }
                         },
-                        // The header field on the search page, which under
-                        // Simplified reopens that same editor rather than
-                        // raising the inline keyboard.
                         editSearch = { current -> openSearchEditor(current) },
                         more = { page -> go { MoreScreen(it, page) } },
-                        // Simplified's centre button: the library index, which
-                        // also drops search if that is what is showing.
                         browse = { LibraryNav.pressLibrary() },
                         openAlbum = { id, parent -> openAlbum(id, parent) },
                         openArtist = { name, parent -> openArtist(name, parent) },

@@ -21,22 +21,16 @@ import com.thelightphone.sdk.ui.LightTextInputEditor
 /**
  * Password entry on the LP3 keyboard, masked as you type.
  *
- * [LightTextInputEditor] renders `state.text` verbatim — there is no mask or
- * visual transformation — so handing it a password would print it on screen at
- * heading size. Rather than patch the SDK or rebuild the editor, this feeds it a
- * [TextFieldState] containing only bullets while keeping the real characters in a
- * separate buffer. The editor's chrome, layout and keyboard are the stock ones;
- * only the keystroke callback differs.
- *
- * The buffer is a [StringBuilder] that is wiped when the screen finishes, so the
- * password isn't left sitting in an immutable String for the GC to copy around.
+ * [LightTextInputEditor] renders `state.text` verbatim, with no mask of its
+ * own, so this feeds it a [TextFieldState] of bullets while keeping the real
+ * characters in a separate [StringBuilder], wiped when the screen finishes.
  */
 class PasswordEntryScreen(
     sealed: SealedLightActivity,
     private val title: String = "Password",
 ) : SimpleLightScreen<String?>(sealed) {
 
-    // While casting, the rocker belongs to the speaker — see handleVolumeKey.
+    // While casting, the rocker belongs to the speaker. See handleVolumeKey.
     override fun onKeyDown(keyCode: Int, event: KeyEvent): Boolean =
         App.playback.handleVolumeKey(keyCode) || super.onKeyDown(keyCode, event)
 
@@ -46,9 +40,7 @@ class PasswordEntryScreen(
             // What the editor draws: one bullet per real character.
             val masked = rememberTextFieldState("")
             val secret = remember { StringBuilder() }
-            // The phone's keyboard settings, with swipe typing off whatever they
-            // say: this keyboard masks what it types and offers no words, so a
-            // swiped word would have nowhere to go — see onSubmitWord below.
+            // Swipe typing forced off; this keyboard offers no words. See onSubmitWord below.
             val options = rememberPhoneKeyboardOptions(swipe = false)
 
             val callback = remember {
@@ -58,9 +50,8 @@ class PasswordEntryScreen(
                     onReturn = { finish(secret) },
                 )
             }
-            // Constructed directly rather than through `viewModel()`: that helper
-            // lives behind an `implementation` dependency the tool can't see, and a
-            // remembered instance is enough for a portrait-locked, single-use screen.
+            // Constructed directly: `viewModel()` lives behind an `implementation`
+            // dependency the tool can't see.
             val keyboard: Lp3KeyboardViewModel<*> = remember {
                 EnQwertyLp3KeyboardViewModel<Unit>(
                     callback,
@@ -155,7 +146,6 @@ private class MaskedKeyboardCallback(
     override fun onKeyLongPressed(code: Int) = Unit
     override fun onKeyCancelled(code: Int) = Unit
 
-    /** Predictive text would leak the password into a suggestion strip. Ignored. */
-    /** Never called: swipe typing is pinned off for this keyboard, see above. */
+    /** Never called; swipe typing is pinned off for this keyboard. See above. */
     override fun onSubmitWord(word: CharSequence) = Unit
 }

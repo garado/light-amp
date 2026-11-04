@@ -7,18 +7,13 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
 /**
- * Plex's own LAN discovery — GDM — for finding players on this network.
+ * Plex's own LAN discovery (GDM), for finding players on this network.
+ * The account's device list at plex.tv can miss a device that's sleeping
+ * or just woke; broadcasting on the LAN finds it directly.
  *
- * The way Plex's own controllers find a player, and the reason it is here: the
- * account's device list at plex.tv is not a reliable census. It drops a device
- * that sleeps, and an Apple TV woken up and playing music can be missing from
- * it entirely while sitting on the same Wi-Fi, ready. Asking the network
- * settles that without asking anyone's opinion.
- *
- * A broadcast `M-SEARCH` to port 32412 and each player answers, unicast, with
- * a few HTTP-shaped headers naming itself. Replies come back to our own
- * ephemeral port, so this needs no multicast lock and no WifiManager — the
- * same reason the SSDP discovery in `DlnaCast` doesn't.
+ * Sends a broadcast `M-SEARCH` to port 32412; each player replies unicast
+ * with HTTP-shaped headers. Replies arrive on an ephemeral port, so this
+ * needs no multicast lock or WifiManager.
  */
 object PlexGdm {
 
@@ -27,12 +22,7 @@ object PlexGdm {
     private const val LISTEN_MS = 2_000
     private const val SOCKET_TIMEOUT_MS = 400
 
-    /**
-     * Players that answer within a couple of seconds.
-     *
-     * Blocking on the network, so it belongs off the main thread; [findPlayers]
-     * places itself.
-     */
+    /** Players that answer within a couple of seconds. Runs off the main thread. */
     suspend fun findPlayers(): List<PlexPlayer> = withContext(Dispatchers.IO) {
         val found = LinkedHashMap<String, PlexPlayer>()
         runCatching {
@@ -64,11 +54,9 @@ object PlexGdm {
     }
 
     /**
-     * One reply into a player, or null when it isn't one that can play.
-     *
-     * The body is HTTP-shaped: a status line then `Header: value` lines. The
-     * address is the socket's, not anything the reply claims — a device is
-     * where it answered from.
+     * One reply into a player, or null if it can't play.
+     * The body is HTTP-shaped: a status line, then `Header: value` lines.
+     * The address used is the socket's, not anything the reply claims.
      */
     internal fun parseReply(body: String, fromAddress: String): PlexPlayer? {
         if (fromAddress.isBlank()) return null

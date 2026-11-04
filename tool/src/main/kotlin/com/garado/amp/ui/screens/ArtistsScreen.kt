@@ -69,8 +69,7 @@ class ArtistDetailScreen(
                 onBack = { goBack() },
                 title = name,
                 fitTitle = true,
-                // List or grid is a row on More now, with the rest of what can
-                // be changed about how this page looks.
+                // List/grid lives on the More screen with the rest of the display settings.
                 rightAction = libraryCornerAction(LibraryPage.ARTIST, name),
             )
             if (grid) {
@@ -78,12 +77,10 @@ class ArtistDetailScreen(
                     albums = artistAlbums,
                     onOpen = { album -> openAlbum(album.id, Parent.Here) },
                     onLongPress = { album -> go { AlbumActionsScreen(it, album.id) } },
-                    // One anchor per artist, and one header item — the song
-                    // shortcuts spanning the first row.
+                    // One header item: the song shortcuts spanning the first row.
                     state = rememberGridAnchor("artist-albums:$name/grid", headerCount = 1),
                 ) {
-                    // Spans the row, so the two song shortcuts read as a header
-                    // over the records rather than as the first one.
+                    // Spans the row so the shortcuts read as a header, not a grid item.
                     item(span = { GridItemSpan(maxLineSpan) }) {
                         SongShortcuts()
                     }
@@ -95,12 +92,9 @@ class ArtistDetailScreen(
                 headerCount = 1,
                 modifier = Modifier.fillMaxSize(),
             ) {
-                // Liking lives on the artist list's long-press, not here: this
-                // page is the discography, and a heart at the top of it was the
-                // one row that wasn't a way into the music.
+                // Liking lives on the artist list's long-press, not here.
                 item { SongShortcuts() }
-                // No Shuffle here: this page is a discography, and shuffling a
-                // whole artist belongs on the song list instead.
+                // No Shuffle here; this page is a discography, not the song list.
                 items(artistAlbums, key = { it.id }) { album ->
                     TrackRow(
                         title = album.title,
@@ -117,19 +111,13 @@ class ArtistDetailScreen(
     }
 }
 
-/**
- * Long-press sheet for an artist: the one place an artist is liked.
- *
- * A heart on the artist page competed with the discography for the top of the
- * screen while being the one row there that didn't lead to music; here it is
- * where every other list keeps its per-item actions.
- */
+/** Long-press sheet for an artist. The only place an artist can be liked. */
 class ArtistActionsScreen(
     sealed: SealedLightActivity,
     private val name: String,
 ) : SimpleLightScreen<Unit>(sealed) {
 
-    // While casting, the rocker belongs to the speaker — see handleVolumeKey.
+    // While casting, the rocker belongs to the speaker. See handleVolumeKey.
     override fun onKeyDown(keyCode: Int, event: KeyEvent): Boolean =
         App.playback.handleVolumeKey(keyCode) || super.onKeyDown(keyCode, event)
 

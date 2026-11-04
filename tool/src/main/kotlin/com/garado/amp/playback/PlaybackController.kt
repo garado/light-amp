@@ -73,12 +73,10 @@ class PlaybackController(
     private val downloads: DownloadStore,
     private val scope: CoroutineScope,
     /**
-     * Whether the server may be spoken to at all — see App.metadataAllowed.
+     * Whether the server may be contacted at all. See App.metadataAllowed.
      *
-     * Playback itself is not gated by this: what may be *streamed* is decided
-     * by the mode and the source's own cellular format. This governs the small
-     * talk that goes with it — timelines, now-playing, scrobbles — which used
-     * to carry on over cellular in a mode whose whole promise is that it won't.
+     * Does not gate playback itself, only metadata traffic like timelines,
+     * now-playing, and scrobbles.
      */
     private val metadataAllowed: () -> Boolean = { true },
 ) {
@@ -87,7 +85,7 @@ class PlaybackController(
     /**
      * Whether anything has actually played since the queue last reached its end.
      *
-     * Tells a finished queue apart from one that was merely cued up — see
+     * Tells a finished queue apart from one that was merely cued up. See
      * [rewindIfQueueFinished].
      */
     private var hasPlayed = false
@@ -96,10 +94,9 @@ class PlaybackController(
     val queue: StateFlow<List<Track>> = _queue
 
     /**
-     * What the queue was started *as*, where that has a name — "Judith Radio"
-     * — for anything that wants to keep it, like saving it as a playlist. Null
-     * for a queue that is just some songs. Set with the queue and cleared with
-     * it; adding to the queue leaves it, since the radio is still what it was.
+     * Name of the current queue, if it was started as a named list (e.g. a
+     * radio station). Null for an ad hoc queue. Set and cleared with the
+     * queue; appending tracks does not clear it.
      */
     private val _queueName = MutableStateFlow<String?>(null)
     val queueName: StateFlow<String?> = _queueName
@@ -108,7 +105,7 @@ class PlaybackController(
     val index: StateFlow<Int> = _index
 
     /**
-     * Loudness normalisation on/off — fed from settings by App. While on, the
+     * Loudness normalisation on/off, fed from settings by App. While on, the
      * playing track's server-measured gain ([Track.gainDb]) becomes the
      * player's own volume; see the collector in [bind].
      */
@@ -157,28 +154,19 @@ class PlaybackController(
         listenedMs = 0L
         playStartedAtMs = if (_isPlaying.value) System.currentTimeMillis() else null
     }
-    /** Identity of the queue last handed to the server — see pushQueueToServer. */
+    /** Identity of the queue last handed to the server. See pushQueueToServer. */
     private var lastSavedQueueKey: Int? = null
 
     /**
-     * Identifies playback to the server, distinct from any other stream (or
-     * download) in flight — see the comment on [MusicServer.streamUrl]. Carried
-     * on both the stream URL and the [reportTimeline] calls that go with it, so
-     * Plex's dashboard has one session to show rather than none.
+     * Identifies playback to the server; carried on stream URLs and
+     * [reportTimeline] calls. Plex keeps one transcode per session id and
+     * tears down any earlier session using the same id, so every queued
+     * track needs its own id derived from the track rather than one id
+     * reassigned per track change, otherwise preparing the next track can
+     * kill the stream currently playing.
      *
-     * One id **per track**, derived rather than minted, because of when stream
-     * URLs are built: the whole queue is turned into audio items at once, each
-     * carrying the id that existed at that moment. A single field reassigned on
-     * every track change therefore ended up reporting a session that no stream
-     * was carrying — and gave every queued track the same identifier, which is
-     * the one thing Plex must not see twice. It keeps one transcode per
-     * identifier and tears down the previous holder, so the next track being
-     * prepared while the current one plays could kill the stream that is
-     * playing. Deriving it from the track keeps the URL and the timeline in
-     * agreement however far ahead the queue was built.
-     *
-     * [playbackSession] changes with each new queue, so playing the same track
-     * again is a new session rather than a continuation of the old one.
+     * Changes with each new queue, so replaying the same track starts a new
+     * session.
      */
     private var playbackSession: String = UUID.randomUUID().toString()
 
@@ -201,29 +189,23 @@ class PlaybackController(
     private var streamOffsetMs = 0L
 
     /**
-     * The track whose queue slot currently holds a server-seeked *remainder*
-     * instead of the whole song. The replacement is real: it lives in the
-     * player's queue, so it would be what plays on every later visit — a
-     * repeat wrap or a tap on the row would play the tail the last seek left
-     * behind. The index collector puts the original item back the moment
-     * playback leaves the slot; [LightAudioPlayer.onItemRepeated] handles the
-     * one return path with no index change.
+     * Track whose queue slot holds a server-seeked remainder instead of the
+     * full track. The index collector restores the original item once
+     * playback leaves the slot, otherwise a repeat or re-tap would replay
+     * the seeked tail instead of the whole song.
      */
     @Volatile
     private var offsetItemTrackId: String? = null
 
     /**
-     * The same trick for the renderer: how far into the track its stream starts.
-     *
-     * A UPnP Seek is a byte-range request, and a Navidrome transcode is a live
-     * ffmpeg pipe with no seek table — so handing the Denon a seek right after
-     * SetAVTransportURI got the request refused and the track played from the
-     * top, which is why casting mid-song sometimes "restarted" it. The offset
-     * goes into the URL instead, and the readouts are shifted back.
+     * Seek offset for the cast renderer's stream, folded into the URL
+     * instead of sent as a UPnP Seek: a live transcode has no seek table,
+     * so a Seek sent right after SetAVTransportURI gets refused and the
+     * track restarts from the top. Readouts are shifted back by this amount.
      */
     private var castOffsetMs = 0L
 
-    /** Where the current cast track was started from — see pollRenderer. */
+    /** Where the current cast track was started from. See pollRenderer. */
     private var castStartedAtMs = 0L
 
     /**
@@ -237,20 +219,14 @@ class PlaybackController(
     private var forceOffline = false
     private var retriedTrackId: String? = null
 
-    /**
-     * Tracks whose stream failed, which play from disk instead.
-     *
-     * Narrower than [forceOffline], and the right size for a server that is
-     * plainly there but wouldn't serve *this* song: one track goes to its
-     * downloaded copy and everything else still streams.
-     */
+    /** Tracks whose stream failed; these play from their downloaded copy while everything else still streams. */
     private val streamFailed = mutableSetOf<String>()
 
     // Queue order captured when shuffle was switched on, so switching it back off
     // can restore it.
     private var preShuffleOrder: List<Track>? = null
 
-    // --- DLNA casting (TEMPORARY — removed before submitting to Light) --------
+    // --- DLNA casting (TEMPORARY, removed before submitting to Light) --------
 
     private val _castRenderer = MutableStateFlow<DlnaRenderer?>(null)
     val castRenderer: StateFlow<DlnaRenderer?> = _castRenderer
@@ -260,22 +236,17 @@ class PlaybackController(
 
     private var castJob: Job? = null
 
-    // --- Plex Companion casting (permanent — plain HTTP, all in tool code) ----
+    // --- Plex Companion casting (permanent, plain HTTP, all in tool code) ----
 
     private val _plexPlayer = MutableStateFlow<PlexPlayer?>(null)
     val plexPlayer: StateFlow<PlexPlayer?> = _plexPlayer
 
     /**
-     * Whether the fader can move a Companion player's volume — decided by
-     * evidence, not by the player's word.
-     *
-     * A player that reports a level it doesn't own is the awkward case, and
-     * the common one: an Apple TV feeding a receiver over optical says
-     * `volume="0"` for ever, takes the command, and changes nothing — the
-     * amplifier owns the sound. So [Unknown] is where every player starts,
-     * a drag is allowed as a *probe*, and the answer comes from what the
-     * player reports afterwards. Once [NotOurs], the fader is disabled rather
-     * than left to lie.
+     * Whether the fader can control a Companion player's volume. Some
+     * players report a fixed or stale volume while actually passing audio
+     * through to an external amp that owns the real level. Starts at
+     * [Unknown]; a drag is used as a probe, and the result settles it to
+     * [Controllable] or [NotOurs].
      */
     enum class PlexVolume { Unknown, Controllable, NotOurs }
 
@@ -294,15 +265,12 @@ class PlaybackController(
     private var plexCommandId = 0
 
     /**
-     * How far into [_queue] the player has been given, or -1 when it holds the
-     * lot.
-     *
-     * A play queue names every track in one `uri`, and Plex takes that in the
-     * *request line* — a 500-track queue is 5 KB of URL and the server answers
-     * "Error parsing HTTP request" before reading a byte of it. So a long queue
-     * goes over in a window, topped up in place as the player nears the end,
-     * which costs nothing audible: appending to a play queue is an edit, not a
-     * new queue.
+     * How far into [_queue] the player has been given; -1 means the whole
+     * queue. Plex play queues are submitted as one URI in the request line,
+     * so a large queue overflows the server's URL length limit. Large
+     * queues are sent in a window and topped up as the player nears the
+     * end; appending to a play queue is an edit, not a new queue, so this
+     * costs nothing audible.
      */
     private var plexWindowEnd = -1
 
@@ -335,12 +303,10 @@ class PlaybackController(
     private val castFormats = mutableMapOf<String, Pair<StreamFormat, String>>()
 
     /**
-     * Whether a track's stream can be seeked, keyed by track and format.
-     *
-     * Per track rather than per format: asking a server for mp3 gets a live
-     * transcode for a flac original and the untouched file for an mp3 one, and
-     * only the second of those can be seeked. Only settled answers are kept, so
-     * a probe that failed is asked again rather than remembered as a no.
+     * Whether a track's stream can be seeked, keyed by track and format. A
+     * transcoded stream can't be seeked, but a file served as-is can, so
+     * seekability depends on the track, not just the requested format.
+     * Failed probes are retried rather than cached as a no.
      */
     private val castSeekable = mutableMapOf<String, Boolean>()
 
@@ -349,49 +315,29 @@ class PlaybackController(
     private var castNextUrl: String? = null
 
     /**
-     * The queue index the renderer's next slot has been armed for — or offered
-     * and refused.
-     *
-     * Arming is attempted from the poll loop now rather than once per track, so
-     * without this a renderer that doesn't implement SetNextAVTransportURI would
-     * be asked again every second for the whole lead window.
+     * Queue index the renderer's next slot is armed for, or was offered and
+     * refused. Tracked so a renderer that doesn't implement
+     * SetNextAVTransportURI isn't asked again on every poll.
      */
     private var castNextArmedFor: Int? = null
 
     /**
-     * True once [bind] has attached the audio stack.
-     *
-     * Restoring the last queue needs a player, and does nothing without one —
-     * see [restoreState], which has no second chance. Boot launches that restore
-     * on another thread and only then binds, so the two really are in a race,
-     * and this is how the restore waits for its turn.
+     * True once [bind] has attached the audio stack. [restoreState] needs a
+     * bound player and does not retry, so this is how a concurrent boot
+     * restore waits for bind to finish.
      */
     private val _bound = MutableStateFlow(false)
     val bound: StateFlow<Boolean> = _bound
 
     /**
-     * A finished queue goes back to its first track and stays stopped.
+     * Rewinds a finished queue back to its first track and leaves it stopped.
      *
-     * ExoPlayer leaves a queue that has run out parked on the last song at its
-     * very end, so the next press of play replays that song rather than the
-     * record — and the player sits showing the last track as if it were about to
-     * start. Winding back to the top says what actually happened: this is over,
-     * and here is where it begins again.
-     *
-     * Repeat is not this function's business: with TRACK or QUEUE the player
-     * loops and never reaches an end to notice.
-     *
-     * The SDK does not surface `STATE_ENDED` — see LightAudioPlayer, which keeps
-     * it to itself — so this reads the same evidence Media3 would: playback
-     * stopped, on the last item, with the position at its duration. The slack is
-     * small enough that pausing by hand a second from the end is not mistaken
-     * for the queue running out.
-     *
-     * [hasPlayed] is the other half of that inference and the important half: a
-     * queue is only finished if it ran. Restoring cues the last track up and
-     * pauses (see [restoreState]), which is a stop at the end of the last item
-     * without a note having been played — and rewinding *that* would throw away
-     * the track the app was reopened to continue.
+     * ExoPlayer leaves a finished queue parked on the last track at full
+     * duration instead of signaling an end, and the SDK doesn't surface
+     * `STATE_ENDED`, so "finished" is inferred from: not casting, stopped,
+     * on the last item, repeat off, and position at duration. [hasPlayed]
+     * guards against treating a freshly restored but unplayed queue as
+     * finished.
      */
     private fun rewindIfQueueFinished(p: LightAudioPlayer) {
         if (isCasting) return
@@ -399,12 +345,8 @@ class PlaybackController(
         if (_repeatMode.value != RepeatMode.OFF) return
         val last = _queue.value.lastIndex
         if (last < 0 || _index.value != last) return
-        // The player's own duration when it has one — but a chunked transcode
-        // may never report any (it stays 0 for the whole track), which silently
-        // disabled this for streamed queues: the queue stopped at the end of
-        // the last track and just sat there. The library's number is the
-        // fallback, compared in the track's own timeline the way the readouts
-        // are.
+        // A chunked transcode may never report its own duration (it stays 0),
+        // so the library's known duration is the fallback.
         val reported = p.durationMs.value
         val endReached = if (reported > 0L) {
             p.positionMs.value >= reported - QUEUE_END_SLACK_MS
@@ -413,16 +355,12 @@ class PlaybackController(
             known > 0L && _positionMs.value >= known - QUEUE_END_SLACK_MS
         }
         if (!endReached) return
-        // Paused first: a seek out of the ended state with playWhenReady still
-        // true starts the queue over from the top instead of waiting there.
-        //
-        // On Main, because this is reached from the isPlaying collector, which
-        // runs on Default: ExoPlayer's looper is Main and it throws rather than
-        // tolerating anything else — every other player call in this class
-        // places itself for that reason, and this one didn't, so reaching the
-        // end of the last track killed the app. The rest is set here rather
-        // than inside, so a second emission arriving before that block runs
-        // can't queue a second rewind behind it.
+        // Paused first: seeking out of the ended state with playWhenReady still
+        // true would start the queue over instead of waiting. ExoPlayer's
+        // looper is Main-only, and this runs from a Default-dispatcher
+        // collector, so the call is placed on Main explicitly. The rest of the
+        // state is set here, outside the launch, so a second emission can't
+        // queue a second rewind.
         scope.launch(Dispatchers.Main.immediate) {
             p.pause()
             p.seekToIndex(0)
@@ -436,29 +374,24 @@ class PlaybackController(
     fun bind(audio: LightAudio) {
         if (player != null) return
         // Detached: playback lives in the SDK's own service, so it survives the
-        // screen going off — and the activity going away — officially.
+        // screen turning off and the activity going away.
         val p = audio.newPlayer(LightAudioUsage.Music, LightAudioPlayback.Detached)
         player = p
         p.onItemRepeated = {
-            // Repeat-one wrapped the current item. A full track wraps to its
-            // own beginning and needs nothing; a server-seeked remainder would
-            // loop its last few seconds forever, so it is rebuilt from the
-            // track's real start. On Main: the player invokes this on its own
-            // thread, which is Main by the looper rule.
+            // A server-seeked remainder would loop just its last few seconds
+            // on repeat-one, so it gets rebuilt from the track's real start.
             if (streamOffsetMs > 0L) seekTo(0)
         }
         p.onPlaybackError = { error ->
-            // A bad HTTP status is proof the server is *there*: it answered, it
-            // just didn't like the request. Treating that as "unreachable" takes
-            // the whole library down to downloads-only over one bad URL, and it
-            // stays that way until something else proves otherwise.
+            // A bad HTTP status means the server answered but refused the
+            // request, which is different from being unreachable.
             fallBackOffline(
                 serverAnswered = error.errorCode == PlaybackException.ERROR_CODE_IO_BAD_HTTP_STATUS,
             )
         }
-        // While casting, the renderer is the source of truth for these — the local
-        // player sits paused and would otherwise report position 0 / not-playing
-        // straight over the cast state.
+        // While casting, the renderer is the source of truth for these: the
+        // local player sits paused and would otherwise report position 0 /
+        // not-playing over the cast state.
         scope.launch {
             p.isPlaying.collect { playing ->
                 if (isCasting) return@collect
@@ -479,24 +412,15 @@ class PlaybackController(
         scope.launch {
             p.durationMs.collect { reported ->
                 if (isCasting) return@collect
-                // What the library says the track runs to, which is a real number
-                // even before a single byte has arrived.
                 val current = _queue.value.getOrNull(_index.value)
                 val known = current?.durationMs ?: 0L
-                // Playing off the disk, rather than off the server.
                 val fromFile = current?.id?.let { localFiles.containsKey(it) } == true
-                // The server took the seek request and ignored it.
-                //
-                // Navidrome only honours timeOffset while it is actually
-                // transcoding. Ask it for a format the file already is — mp3
-                // for an mp3 — and it serves the file whole and drops the
-                // offset, so the audio restarts from the beginning while the
-                // readouts, shifted by streamOffsetMs, insist the seek worked.
-                //
-                // A seeked stream's own duration is the *remainder*; this one's
-                // is the whole track, which is how the two are told apart. The
-                // file is a real file with a seek table, so the player can
-                // finish the job itself.
+                // Navidrome only honors a seek offset while actually
+                // transcoding. If the requested format matches the file as-is,
+                // it serves the whole file and ignores the offset, so the
+                // reported duration equals the track's full known duration
+                // instead of the shortened remainder. Detect that and finish
+                // the seek on the player side, which has a real seek table.
                 if (streamOffsetMs > 0L &&
                     known > 0L &&
                     reported >= known - IGNORED_OFFSET_SLACK_MS
@@ -508,28 +432,20 @@ class PlaybackController(
                     return@collect
                 }
                 _durationMs.value = when {
-                    // A transcode arrives chunked, with no length to derive a
-                    // duration from — Plex streams every format but the original
-                    // that way. The player reports nothing, and without this the
-                    // bar has a position and no end to measure it against.
+                    // Plex streams every non-original format chunked, with no
+                    // length to derive a duration from.
                     reported <= 0L -> known
-                    // A server-seeked stream is a shorter file starting at 0:00,
-                    // so its own duration is the remainder, not the track's.
+                    // A server-seeked stream's own duration is the remainder,
+                    // not the full track's.
                     streamOffsetMs > 0 -> known.takeIf { it > 0L } ?: (reported + streamOffsetMs)
-                    // A downloaded file's length is the server's to state, not
-                    // the player's to guess. Plex transcodes mp3 as a stream, so
-                    // what lands on disk has no Xing header and ExoPlayer falls
-                    // back to size ÷ the first frame's bitrate — which on a
-                    // variable-rate encode is wrong by however quiet that frame
-                    // happened to be. "I Want You" is 3:07 and was reported as
-                    // 22:57: a 235 kbps file read as though it were 32. The
-                    // library's number came from the server, which has the whole
-                    // file and no reason to guess.
+                    // A downloaded file transcoded as mp3 has no Xing header,
+                    // so ExoPlayer estimates its duration from size divided by
+                    // the first frame's bitrate, which is wrong for a
+                    // variable-rate encode. The library's server-reported
+                    // duration is accurate; prefer it.
                     fromFile && known > 0L -> known
                     else -> reported
                 }
-                // AmpDur: temporary — chasing a downloaded track whose position
-                // ran past its end with no sound (2026-09-02).
                 android.util.Log.i(
                     "AmpDur",
                     "duration reported=$reported known=$known off=$streamOffsetMs " +
@@ -538,10 +454,9 @@ class PlaybackController(
             }
         }
         // ReplayGain: the playing track's measured gain becomes the player's
-        // own volume. Attenuate-only (clamped at unity) — loud masters come
-        // down toward the reference and quiet ones play untouched, so no
-        // boost can ever clip. Sources that measure nothing leave it at 1.
-        // Not applied while casting: the renderer plays its own copy.
+        // own volume, attenuate-only and clamped at unity so no track is ever
+        // boosted. Not applied while casting, since the renderer plays its
+        // own copy.
         scope.launch {
             combine(p.currentMediaItemIndex, _queue, replayGain) { idx, q, on ->
                 val db = if (on) q.getOrNull(idx)?.gainDb else null
@@ -554,8 +469,6 @@ class PlaybackController(
             p.currentMediaItemIndex.collect { idx ->
                 if (isCasting) return@collect
                 if (idx >= 0 && idx != _index.value) {
-                    // AmpDur: temporary — see above. What the player landed on,
-                    // against what the library says it should be.
                     val landed = _queue.value.getOrNull(idx)
                     android.util.Log.i(
                         "AmpDur",
@@ -568,33 +481,21 @@ class PlaybackController(
                     )
                     _index.value = idx
                     resetListened()
-                    // A new track is a fresh stream from its own beginning —
-                    // the position as much as the offset. Left standing, the
-                    // position stayed the *outgoing* track's until the player
-                    // emitted its first reading for this one, and everything
-                    // that read it in between got that: the readout showed
-                    // 5:23 against a 3:52 track, and reportTimeline below sent
-                    // the same number under the new track's id and duration.
-                    // Plex answered 400 "Time value greater than duration"
-                    // where the new track was shorter, and where it was longer
-                    // took the number and wrote it in as a resume point.
-                    //
-                    // Safe to clear here: the paths that legitimately start a
-                    // track part-way — a restored queue, a server seek — set
-                    // _index before the player moves, which is what keeps them
-                    // out of this block at all. See rebuildQueueAt.
+                    // Reset position and offset for the new track. Paths that
+                    // legitimately start a track part-way (a restored queue, a
+                    // server seek) set _index before the player moves, so they
+                    // never reach this block; see rebuildQueueAt.
                     streamOffsetMs = 0
                     _positionMs.value = 0L
-                    // Leaving a server-seeked remainder is the moment to put
-                    // the whole song back in its slot, so any later visit —
-                    // a repeat-all wrap, a tap on the queue row — plays the
-                    // track and not the tail the last seek left behind.
+                    // Put the whole song back in its slot when leaving a
+                    // server-seeked remainder, so a later repeat wrap or tap on
+                    // the queue row plays the track and not the seeked tail.
                     offsetItemTrackId?.let { staleId ->
                         offsetItemTrackId = null
                         val q = _queue.value
                         if (q.getOrNull(idx)?.id == staleId) {
-                            // Arrived *onto* a stale remainder (a wrap over a
-                            // slot that never got restored): rebuild it live.
+                            // Landed on a stale remainder (a wrap over a slot
+                            // that was never restored): rebuild it live.
                             scope.launch(Dispatchers.Main.immediate) { seekTo(0) }
                         } else {
                             val stubIdx = q.indexOfFirst { it.id == staleId }
@@ -606,15 +507,11 @@ class PlaybackController(
                             }
                         }
                     }
-                    // A new track is a new session too, or Plex sees the same
-                    // one just keep changing what it's playing rather than one
-                    // track ending and the next beginning. The one it replaces
-                    // is told it's stopped first, so it doesn't just sit in
-                    // `/status/sessions` until its lease times out.
+                    // A new track opens a new session; the old one is told it
+                    // stopped so it doesn't linger in `/status/sessions`.
                     _queue.value.getOrNull(idx)?.let { openSessionFor(it.id) }
-                    // Seeded from the library rather than waited for: a chunked
-                    // stream may never report a duration at all, and the player
-                    // won't emit again to give the collector above a second go.
+                    // Seeded from the library since a chunked stream may never
+                    // report its own duration.
                     _queue.value.getOrNull(idx)?.durationMs
                         ?.takeIf { it > 0L }
                         ?.let { _durationMs.value = it }
@@ -623,17 +520,16 @@ class PlaybackController(
                 announceNowPlaying()
             }
         }
-        // Anything that changes what plays next — an edit, a jump, a repeat mode —
-        // has to be pushed to the renderer, which is holding a URI we chose
-        // earlier. Debounced because a single edit moves several of these at once.
+        // Any change to what plays next (an edit, a jump, a repeat mode) must
+        // be pushed to the renderer, which holds a URI chosen earlier.
+        // Debounced since a single edit can touch several of these at once.
         @OptIn(kotlinx.coroutines.FlowPreview::class)
         scope.launch {
             combine(_queue, _index, _repeatMode) { _, _, _ -> Unit }
                 .debounce(CAST_REQUEUE_DEBOUNCE_MS)
                 .collect {
                     _castRenderer.value?.let {
-                        // What plays next has changed, so whatever the renderer
-                        // was armed with is stale and it gets to be reconsidered.
+                        // Whatever the renderer was armed with is now stale.
                         castNextArmedFor = null
                         armNextIfDue(it)
                     }
@@ -656,13 +552,10 @@ class PlaybackController(
                 reresolveQueue()
             }
         }
-        // Shared with the library rather than queried again here — one read of
-        // the downloads table feeds both. It also fixes a subtler thing: this
-        // used to resolve `dao` once, at bind, and so stayed subscribed to
-        // whichever database was current at boot. After a source switch the map
-        // still described the *previous* source's downloads, whose track ids
-        // match nothing in the new one, so downloaded audio quietly stopped
-        // being used at all.
+        // One read of the downloads table feeds both this map and the
+        // library, instead of resolving `dao` once at bind time; `dao` is
+        // resolved per call so a source switch doesn't leave this map
+        // describing the previous source's downloads.
         scope.launch {
             App.library.downloadFiles.collect { rows ->
                 localFiles = rows.mapNotNull { row ->
@@ -673,12 +566,11 @@ class PlaybackController(
                 reresolveQueue()
             }
         }
-        // Mirror the system media volume so the fader reflects it (and the
-        // hardware volume keys, which drive the same stream).
-        // The hardware rocker moves Android's own media volume, which while
-        // casting controls a player that isn't making the sound. Forwarding it to
-        // the renderer makes the buttons act on whatever is actually playing —
-        // without intercepting the keys, which the tool sandbox can't do.
+        // Mirror the system media volume so the fader reflects the hardware
+        // volume keys too. While casting, those keys still drive Android's
+        // own media volume rather than the renderer, so forward the change to
+        // the renderer instead of intercepting the keys (not possible in the
+        // tool sandbox).
         scope.launch {
             p.deviceVolume.collect { level ->
                 _volume.value = level
@@ -687,12 +579,12 @@ class PlaybackController(
             }
         }
 
-        // A play is submitted part-way through rather than at the start, so the
-        // position is what decides when — see maybeSubmitPlay.
+        // A play is submitted part-way through, not at the start; see
+        // maybeSubmitPlay.
         scope.launch { _positionMs.collect { maybeSubmitPlay() } }
-        // Snapshot the queue periodically rather than on every position tick: the
-        // point is to survive a kill, and a few seconds of lost progress is a fair
-        // trade against writing to DataStore once a second forever.
+        // Snapshot periodically rather than on every position tick, trading a
+        // few seconds of lost progress on a kill for not writing to DataStore
+        // once a second forever.
         scope.launch {
             while (true) {
                 delay(SAVE_STATE_INTERVAL_MS)
@@ -701,9 +593,8 @@ class PlaybackController(
         }
 
         // Plex tears a session out of `/status/sessions` if nothing pings it
-        // for a while — the same idea as a UPnP lease. Only while something is
-        // actually playing: a paused session was already told once and doesn't
-        // need repeating, and an idle queue has no session at all.
+        // for a while, like a lease. Only pinged while playing: a paused
+        // session was already told once, and an idle queue has no session.
         scope.launch {
             while (true) {
                 delay(TIMELINE_INTERVAL_MS)
@@ -722,24 +613,17 @@ class PlaybackController(
     }
 
     /**
-     * Hand the queue to the server, so another client can pick it up where this
-     * one left it.
-     *
-     * Sent only when the queue or the track in it has actually changed, unlike
-     * the local snapshot beside it: this is a network round trip, not a write to
-     * a file on the phone. So the position that rides along is the one from the
-     * moment the track changed — close enough to resume from, and exact when it
-     * matters, because leaving forces one last push.
+     * Hand the queue to the server so another client can resume it. Sent
+     * only when the queue or current track actually changed, since this is
+     * a network round trip rather than a local write.
      */
     private suspend fun pushQueueToServer(tracks: List<Track>, force: Boolean) {
         val client = serverClient.value ?: return
         val at = _index.value.coerceAtLeast(0)
         val currentId = tracks.getOrNull(at)?.id
-        // Trimmed to a window starting at whatever is playing. Subsonic takes
-        // the ids one URL parameter each, so Play All over a large library would
-        // be a request tens of thousands of characters long — refused by the
-        // server, or by anything proxying it, and silently at that. What is
-        // ahead of you is the part another device can use anyway.
+        // Trimmed to a window starting at the current track. Subsonic takes
+        // ids as individual URL parameters, so a large queue would overflow
+        // the request's URL length; only the part ahead is sent.
         val ids = if (tracks.size <= MAX_SAVED_QUEUE) {
             tracks.map { it.id }
         } else {
@@ -754,22 +638,17 @@ class PlaybackController(
     /**
      * Reload the queue saved by a previous run, ready but **paused**.
      *
-     * Resolving ids against the cached library means a track deleted server-side
-     * simply drops out. The index is remapped onto whatever survived so the right
-     * song is still cued rather than an arbitrary neighbour.
+     * Ids are resolved against the cached library, so a track deleted
+     * server-side simply drops out, and the index is remapped onto whatever
+     * survived.
      */
     suspend fun restoreState(library: List<Track>) {
         if (player == null || _queue.value.isNotEmpty()) return
-        // Wait for the downloads to be known before deciding anything.
-        //
-        // Every track resolves to a file or a URL exactly once, when the queue
-        // is built, and the answer is then fixed for as long as that queue
-        // lives. Deciding before the database has answered means deciding with
-        // no downloads on record, so a fully downloaded library restores as a
-        // queue of streams — which on a bad connection stalls for a socket
-        // timeout per track, and offline never plays at all.
-        //
-        // Bounded: a database that never answers must not cost the restore.
+        // Each track resolves to a file or URL once, when the queue is
+        // built, and that choice sticks for the queue's lifetime. Wait for
+        // downloads to load first, or a fully downloaded library restores as
+        // a queue of streams instead. Bounded so a database that never
+        // answers doesn't block the restore.
         withTimeoutOrNull(DOWNLOADS_READY_TIMEOUT_MS) {
             App.library.downloadsLoaded.first { it }
         }
@@ -781,11 +660,10 @@ class PlaybackController(
                 settings.savedPositionMs.first(),
             )
         } else {
-            // Nothing of our own to restore — a fresh install, or a cleared
-            // cache. The server may still be holding what this account was
-            // listening to somewhere else, which is the point of it keeping a
-            // queue at all. Only consulted when this phone has nothing: a queue
-            // the user can see here is never replaced by one they can't.
+            // Nothing local to restore (fresh install or cleared cache); fall
+            // back to whatever queue the server has on file. Only consulted
+            // when this phone has nothing, so a visible local queue is never
+            // replaced by a remote one.
             serverClient.value?.let { runCatching { it.getPlayQueue() }.getOrNull() }
         } ?: return
         val byId = library.associateBy { it.id }
@@ -795,29 +673,26 @@ class PlaybackController(
 
         val p = player ?: return
         val position = saved.positionMs
-        // ExoPlayer's application looper is Main and it enforces that: touching the
-        // player from this coroutine's Default dispatcher throws "Player is accessed
-        // on the wrong thread" and takes the app down on launch. Every other caller
-        // reaches setQueue from a composable, i.e. already on Main.
+        // ExoPlayer's looper is Main-only and throws if touched from this
+        // coroutine's Default dispatcher.
         withContext(Dispatchers.Main.immediate) {
             _queue.value = tracks
             lastScrobbledId = null
             nowPlayingId = null
             resetListened()
-            // Start position goes in at prepare time: seekTo() clamps to the
-            // duration, which is still unknown this early, so it would land on 0.
+            // Start position is passed in at prepare time, since seekTo()
+            // clamps to a duration that isn't known yet and would land on 0.
             rebuildQueueAt(p, tracks, index, position)
-            // Deliberately not p.play(): restoring should cue the track up, not
-            // start making noise on its own the moment the app is opened.
+            // Deliberately not p.play(): restoring cues the track, it
+            // shouldn't start making noise on its own.
             p.pause()
         }
     }
 
     fun release() {
         // A Companion player is deliberately left playing: it walks its own
-        // queue and answers to the server, so closing the app that steered it
-        // is no reason to silence the room — that's how every Plex remote
-        // behaves. Only the steering stops.
+        // queue and answers to the server directly, so closing this app only
+        // stops steering it, the same as any other Plex remote.
         if (_plexPlayer.value != null) {
             android.util.Log.i("AmpPlex", "leaving the player playing")
             // The subscription goes even though the playback stays: pushes to
@@ -829,20 +704,18 @@ class PlaybackController(
             _plexPlayer.value = null
             plexQueue = null
         }
-        // A renderer keeps playing whatever URI it was handed, so leaving without
-        // telling it to stop strands audio on the speaker while the app shows
-        // "This device". Bounded so teardown can't hang on an unreachable device.
+        // A renderer keeps playing its URI even after this app closes, so it
+        // must be told to stop explicitly. Bounded so teardown can't hang on
+        // an unreachable device.
         _castRenderer.value?.let { renderer ->
             castJob?.cancel()
             castJob = null
             _castRenderer.value = null
             runBlocking { withTimeoutOrNull(CAST_STOP_TIMEOUT_MS) { DlnaCast.stop(renderer) } }
         }
-        // One last snapshot before the player goes: an orderly exit should not
-        // lose the few seconds since the last tick. The session is closed out in
-        // the same breath — stop() does it when the queue is emptied, but simply
-        // leaving never went through stop(), so the server was left showing this
-        // phone as playing until the session's lease ran out.
+        // One last snapshot before the player goes, and the session is closed
+        // out here too, since leaving the app never otherwise goes through
+        // stop().
         runBlocking {
             withTimeoutOrNull(SAVE_STATE_TIMEOUT_MS) {
                 sessionTrackId?.let { reportTimelineStoppedNow(it) }
@@ -855,10 +728,9 @@ class PlaybackController(
     }
 
     /**
-     * The blocking form of [reportTimelineStopped], for teardown.
-     *
-     * The fire-and-forget version launches into [scope], which is being torn
-     * down around it — the request would be cancelled before it left.
+     * The blocking form of [reportTimelineStopped], for teardown. The
+     * fire-and-forget version launches into [scope], which would already be
+     * cancelled during teardown.
      */
     private suspend fun reportTimelineStoppedNow(trackId: String) {
         if (LocalLibrary.isLocal(trackId)) return
@@ -875,9 +747,9 @@ class PlaybackController(
     fun playQueue(tracks: List<Track>, startIndex: Int = 0, name: String? = null) {
         if (tracks.isEmpty()) return
         _queueName.value = name
-        // A new queue is a new listening session, so the ids derived from it are
-        // new too — otherwise playing the same track again an hour later would
-        // report itself as the same session still going.
+        // A new queue is a new listening session, so ids derived from it must
+        // be new too, otherwise replaying the same track later would report
+        // itself as the same session still going.
         playbackSession = UUID.randomUUID().toString()
         val start = startIndex.coerceIn(0, tracks.lastIndex)
         if (_shuffle.value) {
@@ -891,17 +763,11 @@ class PlaybackController(
     }
 
     /**
-     * Trim a queue to something the player can actually hold.
-     *
-     * Media3 mirrors the whole timeline into a legacy MediaSession queue for
-     * Bluetooth clients — and loads artwork for every entry while doing it. Handing
-     * it eight thousand tracks ran the process out of memory in
-     * `MediaSessionLegacyStub.updateQueue`, and building that many stream URLs
-     * blocked the tap that started it for seconds.
-     *
-     * The window is centred on the track being played, keeping a little history
-     * behind it, so "play the 3,000th song" still works — it just doesn't carry
-     * the other seven thousand along.
+     * Trim a queue to something the player can actually hold. Media3 mirrors
+     * the whole timeline into a legacy MediaSession queue for Bluetooth
+     * clients and loads artwork for every entry, so a very large queue runs
+     * the process out of memory. The window is centred on the track being
+     * played, with a little history kept behind it.
      */
     private fun capped(tracks: List<Track>, startIndex: Int): Pair<List<Track>, Int> {
         if (tracks.size <= MAX_QUEUE) return tracks to startIndex
@@ -930,7 +796,7 @@ class PlaybackController(
         }
         val p = player ?: return
         val wasPlaying = _isPlaying.value
-        // Resuming needs the server's decision first, exactly as [play] does —
+        // Resuming needs the server's decision first, exactly as [play] does;
         // this is the button that actually starts a restored queue.
         if (wasPlaying) p.pause() else withStreamDecision { p.play() }
         reportTimeline(if (wasPlaying) TimelineState.PAUSED else TimelineState.PLAYING)
@@ -949,22 +815,17 @@ class PlaybackController(
             reportTimeline(TimelineState.PLAYING)
             return
         }
-        // The decision first, then the sound — see MusicServer.prepareStream.
-        // Starting the player before it is settled is what left a restored
-        // queue dead: the stream went out with no decision behind it and came
-        // back 400, which then took the whole library offline.
+        // The server's stream decision must land before playback starts; see
+        // MusicServer.prepareStream.
         withStreamDecision { player?.play() }
         reportTimeline(TimelineState.PLAYING)
     }
 
     /**
      * Run [start] once the server has agreed to serve the current track.
-     *
-     * Only for a streamed track: a file on the phone has no server to ask, and
-     * making it wait would put a round trip in front of playing something that
-     * is already here. Bounded, and it starts anyway on a timeout or a refusal —
-     * a server that won't decide may still serve, and a silent player is the
-     * worse failure.
+     * Only applies to a streamed track; a local file has no server to ask.
+     * Bounded, and starts anyway on a timeout or refusal, since a server
+     * that won't decide may still serve, and a silent player is worse.
      */
     private fun withStreamDecision(start: () -> Unit) {
         val track = currentTrack.value
@@ -1000,18 +861,11 @@ class PlaybackController(
     }
 
     /**
-     * Seek, by whichever route the source allows.
-     *
-     * A downloaded file seeks natively and exactly. A *transcoded* stream can't:
-     * the server is piping a live ffmpeg encode with no seek table, so the
-     * player can only guess a byte offset from an estimated length and then read
-     * forward to reach it — which at 320 kbps means pulling megabytes before a
-     * sound comes out, and landing somewhere approximate when it does.
-     *
-     * So the seek is handed to the server instead: the same track requested with
-     * `timeOffset`, which starts the encode at that second. The stream then runs
-     * from 0:00, and [streamOffsetMs] shifts the readouts back into the track's
-     * own timeline.
+     * Seek, by whichever route the source allows. A downloaded file seeks
+     * natively. A transcoded stream has no seek table, so the seek is
+     * instead handed to the server as a fresh request with `timeOffset`,
+     * which starts the encode at that second; [streamOffsetMs] then shifts
+     * the readouts back into the track's own timeline.
      */
     fun seekTo(ms: Long) {
         _plexPlayer.value?.let { target ->
@@ -1021,12 +875,8 @@ class PlaybackController(
         }
         val renderer = _castRenderer.value
         if (renderer != null) {
-            // The last moments of a track are not worth a seek. Seeking means
-            // pushing the stream again, probing it and seeking it — seconds —
-            // after which the renderer stops almost at once, and a stop before
-            // any poll had seen it playing read as a track that never started:
-            // a six-second wait, then the track again from the top. Dragging to
-            // the end means the next track, and that is what Next does.
+            // A seek this close to the end isn't worth the round trip to the
+            // renderer; treat it as a request to advance instead.
             val total = _durationMs.value
             if (total > 0L && total - ms <= CAST_SEEK_END_SLACK_MS) {
                 android.util.Log.i("AmpCast", "seek $ms of $total is the end → next")
@@ -1037,9 +887,8 @@ class PlaybackController(
                 return
             }
             _positionMs.value = ms
-            // In place when the renderer can, pushed again when it can't — see
-            // seekCast. The track was playing a moment ago, so a stop after
-            // this is the end of it, not a failure to start.
+            // In place when the renderer can, pushed again when it can't; see
+            // seekCast.
             castJob?.cancel()
             castJob = scope.launch {
                 if (seekCast(renderer, ms)) pollRenderer(renderer, playedBefore = true)
@@ -1050,7 +899,7 @@ class PlaybackController(
         val track = _queue.value.getOrNull(_index.value)
         if (track == null || !needsServerSeek(track)) {
             p.seekTo(ms)
-            // Trust it, then check — see [verifyNativeSeek].
+            // Trust it, then check; see [verifyNativeSeek].
             if (track != null) verifyNativeSeek(p, track, ms)
             return
         }
@@ -1058,16 +907,10 @@ class PlaybackController(
     }
 
     /**
-     * Tracks whose native seek was tried and didn't land.
-     *
-     * Whether a stream can be seeked in the player is not something we can work
-     * out in advance. "It's the original file, so it has a seek table" is true
-     * of the file and says nothing about what arrives: a raw stream still needs
-     * the server to answer byte ranges, and when it doesn't, the player reports
-     * the position it was asked for while the audio plays on from the top.
-     *
-     * So it's measured instead of predicted — and remembered, so a track only
-     * pays for the wrong guess once.
+     * Tracks whose native seek was tried and didn't land. Whether a stream
+     * can actually be seeked isn't knowable in advance, since the server
+     * can still refuse byte ranges on an otherwise-seekable format, so this
+     * is measured and remembered rather than predicted.
      */
     private val seekNeedsReload = mutableSetOf<String>()
 
@@ -1078,27 +921,20 @@ class PlaybackController(
     private fun needsServerSeek(track: Track, askPlayer: Boolean = true): Boolean {
         if (track.source() is LightAudioSource.FileSource) return false
         if (track.id in seekNeedsReload) return true
-        // A queue being rebuilt has nothing prepared to ask: the player's
-        // answer would be about the item it held before.
+        // A queue being rebuilt has nothing prepared to ask yet: the player's
+        // answer would describe the item it held before.
         if (!askPlayer) return effectiveFormat() != StreamFormat.RAW
-        // Ask the player, which knows what actually arrived. Asking for mp3 and
-        // getting mp3 means the server sent the file untouched — with a length
-        // and byte ranges — and it then ignores timeOffset, because it is not
-        // transcoding and has nothing to offset. Inferring "not RAW, therefore a
-        // transcode" picks server-seeking for exactly the streams where only
-        // native seeking works, and the failure is silent: the audio restarts
-        // and the clock claims the seek landed.
+        // Ask the player, which knows what actually arrived: requesting a
+        // format the file already is gets served untouched with byte ranges
+        // and real seek support, even though the requested format isn't RAW.
         player?.let { if (it.isCurrentItemSeekable) return false }
-        // Nothing playing yet to ask — fall back to the request we made.
         return effectiveFormat() != StreamFormat.RAW
     }
 
     /**
      * Check where a native seek actually landed, and reload if it missed.
-     *
-     * The player answers with the position it was told to go to, so its own
-     * reading is worthless immediately. A moment later it reflects the stream,
-     * and a stream that ignored the seek is back near the beginning.
+     * The player's position reading is unreliable right after a seek call;
+     * wait briefly so it reflects the actual stream.
      */
     private fun verifyNativeSeek(
         p: LightAudioPlayer,
@@ -1108,10 +944,9 @@ class PlaybackController(
     ) {
         val generation = ++seekGeneration
         scope.launch {
-            // A queue just built has no stream to report on yet, and until it
-            // has one the player answers with the position it was asked for —
-            // the check would pass on a seek about to be dropped. Wait for the
-            // stream to declare itself, within reason.
+            // Wait for the new stream to declare itself, within reason; until
+            // then the player just echoes the requested position and this
+            // check would pass even on a seek about to be dropped.
             if (awaitStream) {
                 withTimeoutOrNull(REBUILD_VERIFY_TIMEOUT_MS) { p.durationMs.first { it > 0L } }
             }
@@ -1134,12 +969,9 @@ class PlaybackController(
             track,
             effectiveFormat(),
             timeOffsetSeconds = (target / 1000).toInt(),
-            // Same as toAudioItem, and it matters even more here: an estimated
-            // length makes ExoPlayer believe the transcode is bounded and
-            // range-seekable, and its end-of-file probe then asks for bytes the
-            // stream doesn't have — Navidrome answers 416 and playback errors.
-            // That was the restored queue "acting weird", and every repeat wrap
-            // of an offset item dying.
+            // An estimated length makes ExoPlayer treat the transcode as
+            // bounded and range-seekable; its end-of-file probe then asks for
+            // bytes the stream doesn't have, and Navidrome answers 416.
             estimateContentLength = false,
             sessionId = sessionIdFor(track.id),
         )
@@ -1163,17 +995,15 @@ class PlaybackController(
             // and left the replacement stream parked.
             val wasPlaying = p.playWhenReady
             val at = _index.value
-            // Replaced in place rather than removed and re-added. Taking the
-            // playing item out moves the player's idea of the current index —
-            // twice, once each way — and the collector above reads that as a new
-            // track and clears streamOffsetMs. The clock then counts up from zero
-            // while the audio plays from where it was asked to.
+            // Replaced in place rather than removed and re-added: removing
+            // it would move the player's current index twice, which the
+            // collector above reads as a track change and clears
+            // streamOffsetMs.
             p.replaceRange(at, at + 1, listOf(item))
-            // The replacement is a stream that already starts at the target, so
-            // it has to play from its own beginning: Media3 keeps the old
-            // position when the item it replaces looks like the same one, which
-            // would land us at the offset twice over. This sets the index the
-            // player is already on, so nothing reads it as a track change.
+            // Media3 keeps the old position when a replacement item looks like
+            // the one it replaced, which would apply the offset twice. Setting
+            // the index explicitly avoids that without reading as a track
+            // change.
             p.seekToIndex(at)
             if (wasPlaying) p.play()
         }
@@ -1190,13 +1020,9 @@ class PlaybackController(
             _plexPlayer.value = null
             plexQueue = null
             plexWindowEnd = -1
-            // Close the subscription too, as every other way out of a cast
-            // does. Left open, the player goes on pushing its timeline at a
-            // socket nobody is reading and then at a dead port, and a player
-            // whose requests keep failing does not stay well — see the note on
-            // playerLock in PlexClient. Nothing else can clean it up either:
-            // the player's own "stopped" push routes to plexCastEnded, which
-            // returns immediately once _plexPlayer is null, as it now is.
+            // Close the subscription too; left open, the player keeps pushing
+            // its timeline at a now-dead port. See the note on playerLock in
+            // PlexClient.
             endPlexSubscription(client, target)
             scope.launch { client?.companionCommand(target, "stop", ++plexCommandId) }
         }
@@ -1206,17 +1032,11 @@ class PlaybackController(
             _castRenderer.value = null
             scope.launch { DlnaCast.stop(renderer) }
         }
-        // The queue goes now, on whatever thread called: these are plain state
-        // writes and need no looper, where the player's own calls do.
-        //
-        // Both inside the Main dispatch below, as they were, stop() returned
-        // having merely *scheduled* the clear — and a source switch, which calls
-        // this from a collector on Default, carried on to swap the client and
-        // the database while the old queue was still there to be read. What read
-        // it was reresolveQueue, rebuilding those tracks' URLs against the
-        // server that had just arrived: Navidrome ids on Plex's transcoder,
-        // refused four times over as the player retried. A queue belongs to the
-        // source it was built from, and must not outlive the decision to leave.
+        // These are plain state writes and run on whatever thread called, with
+        // no looper requirement; the queue must be cleared synchronously here,
+        // before a source switch (which calls stop() from a Default-dispatcher
+        // collector) can resolve stream URLs for tracks against the wrong
+        // source.
         _queue.value = emptyList()
         _queueName.value = null
         _index.value = -1
@@ -1226,11 +1046,10 @@ class PlaybackController(
         _positionMs.value = 0
         _durationMs.value = 0
         val p = player ?: return
-        // Same rule as restoreState: ExoPlayer's looper is Main and it throws
-        // rather than tolerating anything else. Unlike the rest of this class,
-        // stop() is not only reached from a composable — a source switch calls it
-        // from a collector on Default — so it has to place itself. `immediate`
-        // means a caller already on Main is unaffected and still synchronous.
+        // Same rule as restoreState: ExoPlayer's looper is Main-only. Unlike
+        // most of this class, stop() can be reached from a Default-dispatcher
+        // collector (a source switch), so it places itself on Main; `immediate`
+        // keeps a caller already on Main synchronous.
         scope.launch(Dispatchers.Main.immediate) {
             p.stop()
             p.setMediaQueue(emptyList())
@@ -1269,13 +1088,10 @@ class PlaybackController(
         }
         val p = player ?: return
         if (_positionMs.value > PREVIOUS_RESTART_MS) {
-            // The controller's seek, not the player's. A restored or
-            // server-seeked stream is a shorter file that begins mid-track, so
-            // the player's 0 is that offset: the clock snapped back to the
-            // offset instead of 0:00, and since that reads as >3s, every later
-            // press restarted again — Previous could never reach the previous
-            // track. seekTo(0) rebuilds such a stream at the track's real
-            // beginning and clears the offset.
+            // Must be the controller's seekTo(0), not the player's: a
+            // server-seeked stream's own position 0 is really [streamOffsetMs]
+            // into the track, so the player's seek alone would land past the
+            // restart threshold again.
             seekTo(0)
         } else {
             p.skipToPrevious()
@@ -1291,17 +1107,11 @@ class PlaybackController(
             _positionMs.value = 0
             scope.launch {
                 if (plexPushedIds.contains(track.id)) {
-                    // Within the queue it already holds — see companionSkipTo.
+                    // Within the queue it already holds; see companionSkipTo.
                     plexClient()?.companionSkipTo(target, track.id, ++plexCommandId)
-                    // A player keeps its own window of a play queue, and it
-                    // need not hold as much of it as we handed over. A skipTo
-                    // to something outside *its* window is accepted and then
-                    // quietly not acted on — the player stays put and the
-                    // mirror puts the row back, which is exactly what a
-                    // distant song refusing to play looks like. So check where
-                    // it actually went, and rebuild around the track when it
-                    // didn't go there. Same shape as verifyNativeSeek: trust
-                    // the command, then confirm it landed.
+                    // A skipTo outside the player's own window is accepted but
+                    // silently ignored, so verify where it actually landed and
+                    // rebuild around the track if it didn't move.
                     delay(PLEX_SKIP_VERIFY_MS)
                     if (_plexPlayer.value?.id == target.id &&
                         _queue.value.getOrNull(_index.value)?.id != track.id
@@ -1312,11 +1122,8 @@ class PlaybackController(
                         repushPlexQueue(positionMs = 0L)
                     }
                 } else {
-                    // Outside the window the player was given, so there is
-                    // nothing there to skip to — asking left it where it was
-                    // and the poll put the row back. Rebuild the window around
-                    // the track instead; a jump is already a change of what is
-                    // playing, so starting it is what was asked for.
+                    // Outside the window the player was given; rebuild the
+                    // window around the target track instead.
                     android.util.Log.i("AmpPlex", "jump to idx=$index is outside the window — rebuilding")
                     repushPlexQueue(positionMs = 0L)
                 }
@@ -1354,11 +1161,8 @@ class PlaybackController(
     }
 
     /**
-     * Put these tracks immediately after the one playing.
-     *
-     * A track already in the queue is *moved* rather than copied: "play next" on
-     * something queued for later means bring it forward, and inserting a second
-     * copy would leave it to play twice.
+     * Put these tracks immediately after the one playing. A track already
+     * in the queue is moved rather than copied, so it doesn't play twice.
      */
     fun playNext(tracks: List<Track>) {
         val p = player ?: return
@@ -1385,13 +1189,9 @@ class PlaybackController(
     }
 
     /**
-     * Keep what is playing, replace everything after it.
-     *
-     * For a radio started from the song already playing: the song carries on
-     * untouched and the radio becomes what follows, in place of whatever was
-     * queued. The queue's name changes with its contents — see [queueName].
-     * Upcoming items are dropped back to front so each removal can't shift the
-     * ones still to go, as [removeFromQueue] does.
+     * Keep what is playing, replace everything after it. Upcoming items are
+     * dropped back to front so each removal can't shift the indices of the
+     * ones still to go.
      */
     fun replaceUpcoming(tracks: List<Track>, name: String? = null) {
         val p = player ?: return
@@ -1406,9 +1206,7 @@ class PlaybackController(
         _queue.value = q.take(cur + 1) + tracks
         if (tracks.isNotEmpty()) p.addItems(tracks.map { it.toAudioItem() })
         _queueName.value = name
-        // Everything after the playing track goes, then the new set arrives —
-        // expressed as edits so the song already playing carries on untouched,
-        // which is the whole point of replacing only what is upcoming.
+        // Expressed as edits so the currently playing song is untouched.
         plexQueueEdit { client, queue ->
             val emptied = droppedIds.fold<String, PlexQueue?>(queue) { acc, id ->
                 acc?.let { client.removePlayQueueItem(it, id) }
@@ -1432,12 +1230,8 @@ class PlaybackController(
     }
 
     /**
-     * Drop several tracks from the queue at once.
-     *
-     * Removed back to front so each removal can't shift the indices of the ones
-     * still to go, and the surviving list is computed here rather than read back
-     * from the player — a snapshot taken mid-edit is how rows end up playing the
-     * wrong track.
+     * Drop several tracks from the queue at once. Removed back to front so
+     * each removal can't shift the indices of the ones still to go.
      */
     fun removeFromQueue(ids: Set<String>) {
         val p = player ?: return
@@ -1470,8 +1264,8 @@ class PlaybackController(
         val newQueue = q.toMutableList().apply { add(to, removeAt(from)) }
         _queue.value = newQueue
         _index.value = indexAfterEdit(newQueue, playingId)
-        // Plex places an item *after* another one, so the move is expressed as
-        // whoever it now follows — nothing when it lands at the front.
+        // Plex places an item after another one, so the move is expressed as
+        // whoever it now follows (none if it lands at the front).
         val afterId = newQueue.getOrNull(to - 1)?.id
         plexQueueEdit { client, queue -> client.movePlayQueueItem(queue, movedId, afterId) }
     }
@@ -1509,18 +1303,10 @@ class PlaybackController(
     }
 
     /**
-     * Move the fader. While casting this drives the *renderer's* volume over UPnP
-     * RenderingControl; otherwise it's the phone's media stream — the same one the
-     * hardware keys use.
-     */
-    /**
-     * Handle a hardware volume key, returning true when it was ours to handle.
-     *
-     * The keys are deliberately allowed to fall through to the system so the
-     * active MediaSession moves playback volume — but while casting there is no
-     * local playback, so Android moves the *ring* stream and the speaker never
-     * hears about it. Catching them here is the only way the rocker can reach a
-     * renderer; everything else is left to the system exactly as before.
+     * Handle a hardware volume key, returning true when it was ours to
+     * handle. While casting, Android's volume keys move the ring stream
+     * rather than anything the renderer hears, so they're intercepted here
+     * and forwarded to the renderer instead.
      */
     fun handleVolumeKey(keyCode: Int): Boolean {
         if (!isCasting) return false
@@ -1534,19 +1320,16 @@ class PlaybackController(
     }
 
     /**
-     * Set the output's volume, whichever output that is.
-     *
-     * Casting also nudges the device's own level to match, so the rocker starts
-     * from where the renderer actually is rather than jumping on the first press.
+     * Set the output's volume, whichever output that is. While casting,
+     * also nudges the device's own level to match, so the rocker starts
+     * from where the renderer actually is.
      */
     fun setVolume(fraction: Float) {
         val v = fraction.coerceIn(0f, 1f)
         _plexPlayer.value?.let { target ->
-            // A player whose volume isn't its own to move takes no orders —
-            // see judgePlexVolume. Until that is settled, a drag is the probe:
-            // it goes out, and the next polls say whether it landed. The
-            // phone's own level is left alone either way — it has no business
-            // changing while the sound is elsewhere.
+            // See judgePlexVolume. Until settled, a drag is used as a probe;
+            // the device's own level is left alone since the sound is
+            // elsewhere.
             if (_plexVolume.value == PlexVolume.NotOurs) return
             val asked = (v * 100).roundToInt()
             plexVolumeAsked = asked
@@ -1569,11 +1352,9 @@ class PlaybackController(
     }
 
     /**
-     * Toggles shuffle by reordering only the *upcoming* part of the live queue.
-     * History and the current track stay put and the reorder is applied with
-     * incremental move ops, so the playing track is never re-prepared (rebuilding
-     * the queue with setMediaQueue would restart it). Turning shuffle off puts the
-     * upcoming tracks back into their pre-shuffle order.
+     * Toggles shuffle by reordering only the upcoming part of the live
+     * queue, applied with incremental move ops so the playing track is
+     * never re-prepared. Turning shuffle off restores the pre-shuffle order.
      */
     fun toggleShuffle() {
         val on = !_shuffle.value
@@ -1596,52 +1377,37 @@ class PlaybackController(
         }
         if (tail.isEmpty()) return
         _queue.value = head + newTail
-        // One replace rather than a move per track: settling a few hundred
-        // positions one at a time is a timeline update each, which locks the main
-        // thread and (with artwork) exhausts the heap.
+        // One replace rather than a move per track, since moving a few
+        // hundred positions one at a time locks the main thread and (with
+        // artwork) exhausts the heap.
         player?.replaceRange(head.size, q.size, newTail.map { it.toAudioItem() })
-        // Reordering everything upcoming is the one edit not worth expressing
-        // as a move apiece — a shuffled hundred is a hundred round trips. The
-        // player gets a fresh queue, and pays a blip for it.
         if (_plexPlayer.value != null) scope.launch { repushPlexQueue() }
     }
 
     // --- Plex Companion casting ----------------------------------------------
     //
-    // The other way sound leaves the phone, and a different animal from DLNA:
-    // a Plex player (the Apple TV app, another Plexamp…) is handed a
-    // *server-side play queue* and walks it itself — gapless, and skippable
-    // from its own remote. So this side mirrors rather than drives: the poll
-    // adopts whatever the player reports, including track changes and pauses
-    // made on the TV. Commands are relayed through the server the same way the
-    // official controllers do it, so nothing here ever connects to the player.
-    // Only a Plex source can do this, so only a Plex source shows it.
+    // Unlike DLNA, a Plex player (the Apple TV app, another Plexamp...) is
+    // handed a server-side play queue and walks it itself. This side mirrors
+    // rather than drives: polling adopts whatever the player reports, and
+    // commands are relayed through the server rather than connecting to the
+    // player directly. Only available for a Plex source.
 
     private fun plexClient(): PlexClient? = serverClient.value as? PlexClient
 
     /**
-     * Companion players for the active Plex source. Empty on any other source.
-     *
-     * Three answers to the same question, because no one of them is complete:
-     * the server knows the players it discovered itself, plex.tv knows the
-     * account's devices — and forgets the ones that sleep — and [PlexGdm] asks
-     * the network, which is the only one that can see a player nobody has
-     * heard from lately. A device answering GDM is on this Wi-Fi and listening,
-     * which is the whole question.
+     * Companion players for the active Plex source. Empty on any other
+     * source. Combines three sources since none alone is complete: the
+     * server's own list, plex.tv's account devices (which forgets sleeping
+     * ones), and [PlexGdm]'s local network broadcast (the only one that
+     * finds a player nobody has heard from recently).
      */
     suspend fun findPlexPlayers(): List<PlexPlayer> {
         val client = plexClient() ?: return emptyList()
-        // The server's list and plex.tv are both remote lookups, and on a
-        // metered link in Wi-Fi Only they are worse than merely costly: they
-        // name players on a network this phone isn't on, so the page offers a
-        // living room it cannot reach. GDM is a broadcast to whatever network
-        // this is, costs nothing off it, and answers the question that matters.
+        // Server/plex.tv lookups can name players on a network this phone
+        // isn't on, so skip them under Wi-Fi Only metered mode.
         val listed = if (metadataAllowed()) client.companionPlayers() else emptyList()
-        // GDM is a broadcast to the local network, so off Wi-Fi there is nobody
-        // to broadcast to and nothing that could answer — a player reachable
-        // from here would have to be on this network, and there is no network.
-        // It costs no cellular data either way; what it costs is the wait for
-        // its own timeout, on a page that cannot find anything anyway.
+        // GDM only reaches players on the local network, so it's pointless
+        // off Wi-Fi.
         val onNetwork = if (Connectivity.isOnWifi()) PlexGdm.findPlayers() else emptyList()
         val seen = listed.map { it.id }.toMutableSet()
         val extra = onNetwork.filter { seen.add(it.id) }
@@ -1667,17 +1433,14 @@ class PlaybackController(
         plexJob?.cancel()
         plexJob = scope.launch {
             if (_queue.value.isEmpty()) { _plexPlayer.value = null; return@launch }
-            // A device named only by plex.tv is named by an address the account
-            // has on file, and an address is not an identity — a lease that
-            // moved would have us handing this queue to whatever answers there
-            // now. Ask it who it is before it gets any audio.
+            // A plex.tv-only device is identified by an address on file, and
+            // a moved DHCP lease could point it at a different device now, so
+            // confirm identity before sending any audio.
             if (!target.identityKnown && !client.playerIsWhoWeThink(target)) {
                 android.util.Log.i("AmpPlex", "${target.name} isn't who plex.tv said — not casting")
                 _plexPlayer.value = null
                 return@launch
             }
-            // The same push a new queue takes — windowed, so a long queue
-            // doesn't arrive as five kilobytes of URL.
             repushPlexQueue(positionMs = from)
             if (plexQueue == null) {
                 android.util.Log.i("AmpPlex", "play queue refused — staying on this device")
@@ -1708,9 +1471,8 @@ class PlaybackController(
         val p = player ?: return
         _volume.value = p.deviceVolume.value
         if (resumeLocally) {
-            // Same rebuild-not-seek hand-back as the DLNA route, and for the
-            // same reason — see stopCasting. The player's last reported state
-            // decides whether sound starts here or waits.
+            // Same rebuild, not seek, hand-back as the DLNA route; see
+            // stopCasting.
             scope.launch(Dispatchers.Main.immediate) {
                 val tracks = _queue.value
                 if (tracks.isEmpty()) return@launch
@@ -1723,13 +1485,10 @@ class PlaybackController(
     }
 
     /**
-     * Mirror the player's timeline until it stops being one.
-     *
-     * Subscribes first — the protocol's own way round, where the player pushes
-     * its state as it changes — and polls only for a player that won't have
-     * it, or a network that won't route back to us. A poll while paused is
-     * asking a question whose answer isn't changing, so it slows down until
-     * something is playing again.
+     * Mirror the player's timeline until it stops being one. Subscribes
+     * first so the player pushes state changes, falling back to polling for
+     * a player or network that can't support that. Polls less often while
+     * paused.
      */
     private suspend fun pollPlexPlayer(client: PlexClient, target: PlexPlayer) {
         var misses = 0
@@ -1746,10 +1505,8 @@ class PlaybackController(
             }
             val t = client.companionTimeline(target, ++plexCommandId)
             if (t == null || t.state == "stopped") {
-                // A player that stops answering, or reports stopped, was ended
-                // from its own side — someone pressed stop on the TV, or the
-                // app there quit. After a few beats that is the truth, not a
-                // blip: keep the phone's place, paused.
+                // Tolerate a few misses before treating this as a real stop
+                // rather than a transient blip.
                 if (++misses >= PLEX_GONE_POLLS) {
                     plexCastEnded()
                     return
@@ -1759,27 +1516,21 @@ class PlaybackController(
                 adoptPlexTimeline(t)
                 topUpPlexWindow(client, target)
             }
-            // A paused player's state isn't going anywhere; ask a fifth as often.
             delay(if (_isPlaying.value) CAST_POLL_MS else PLEX_IDLE_POLL_MS)
         }
     }
 
     /**
-     * Take the player's word for what is happening — from a poll or a push,
-     * the same either way.
-     *
-     * Everything here flows one direction: the player is the one playing, so
-     * its state is the truth and Amp's is the copy. Nothing in it is echoed
-     * back, or a mode read from the player would be set on the player, which
-     * is a loop.
+     * Take the player's word for what is happening, from a poll or a push.
+     * State flows one direction only; nothing read here is echoed back to
+     * the player, or setting a mode would loop into reading it back.
      */
     private fun adoptPlexTimeline(t: PlexPlayerTimeline) {
         _isPlaying.value = t.state == "playing"
         _positionMs.value = t.timeMs
         if (t.durationMs > 0) _durationMs.value = t.durationMs
         judgePlexVolume(t.volume, t.controllable)
-        // Repeat can be changed on the player's own remote, and a mode the
-        // phone doesn't know about is a phone showing the wrong one.
+        // Repeat can be changed from the player's own remote.
         t.repeat?.let { reported ->
             val mode = when (reported) {
                 1 -> RepeatMode.TRACK
@@ -1794,8 +1545,7 @@ class PlaybackController(
         t.shuffle?.let { on -> if (on != _shuffle.value) _shuffle.value = on }
         val rk = t.ratingKey
         if (rk != null && _queue.value.getOrNull(_index.value)?.id != rk) {
-            // The player moved on its own — its remote skipped, or a track
-            // simply ended. Follow it; don't fight it.
+            // The player moved on its own; follow it rather than fight it.
             val idx = _queue.value.indexOfFirst { it.id == rk }
             if (idx >= 0) {
                 _index.value = idx
@@ -1805,15 +1555,11 @@ class PlaybackController(
     }
 
     /**
-     * Decide whether the fader owns this player's volume.
-     *
-     * The player's own word comes first: a timeline lists what it accepts, and
-     * one that doesn't name `volume` is saying so plainly — an Apple TV feeding
-     * a receiver over optical is passing a full-scale digital stream on and the
-     * amplifier does the attenuating. Where a player says nothing, evidence
-     * decides: a level that moves on its own or follows where we put it means
-     * the fader is real; a level that ignores us for a few polls means it
-     * isn't.
+     * Decide whether the fader owns this player's volume. If the player's
+     * own timeline lists what it accepts and omits `volume`, trust that
+     * directly. Otherwise, judge by evidence: a level that moves on its own
+     * or follows what was asked means the fader is real; one that ignores
+     * several requests means it isn't.
      */
     private fun judgePlexVolume(reported: Int?, controllable: String?) {
         if (_plexVolume.value != PlexVolume.NotOurs &&
@@ -1843,13 +1589,10 @@ class PlaybackController(
     }
 
     /**
-     * Where the playing track sits after a queue edit.
-     *
-     * The local player's index answers when it is the one playing. While the
-     * sound is elsewhere that player sits paused on whatever it held when
-     * casting began, so its index is stale — reading it is what made an edit
-     * start the wrong song. A track's identity survives a reorder; an index
-     * does not.
+     * Where the playing track sits after a queue edit. While casting, the
+     * local player's index is stale (it's paused on whatever it held when
+     * casting began), so the track is relocated by id instead, since an
+     * index doesn't survive a reorder but an id does.
      */
     private fun indexAfterEdit(newQueue: List<Track>, playingId: String?): Int {
         if (newQueue.isEmpty()) return -1
@@ -1861,13 +1604,9 @@ class PlaybackController(
     }
 
     /**
-     * Apply a queue edit to the *live* play queue on the server, then tell the
-     * player to re-read it.
-     *
-     * The queue is the player's own copy, so an edit here has to reach it
-     * somehow. Pushing a whole new queue does — and restarts the current track
-     * to do it, which is the blip an edit used to make. Editing the queue in
-     * place changes what comes next and leaves what is playing alone.
+     * Apply a queue edit to the live play queue on the server, then tell
+     * the player to re-read it. Editing in place leaves the playing track
+     * alone, unlike pushing a whole new queue, which restarts it.
      */
     private fun plexQueueEdit(edit: suspend (PlexClient, PlexQueue) -> PlexQueue?) {
         val target = _plexPlayer.value ?: return
@@ -1880,10 +1619,8 @@ class PlaybackController(
                 repushPlexQueue()
                 return@launch
             }
-            // An edit's own answer carries as much of the queue as Plex felt
-            // like returning, and a place we don't know can't be edited next
-            // time. Re-read the window we pushed so the following edit has
-            // what it needs.
+            // Re-read the window just pushed, since an edit's own answer may
+            // carry less of the queue than the next edit needs.
             val updated = client.readPlayQueue(edited, PLEX_WINDOW) ?: edited
             plexQueue = updated
             plexPushedIds = _queue.value.map { it.id }
@@ -1892,12 +1629,9 @@ class PlaybackController(
     }
 
     /**
-     * Hand the player a whole new queue, cued at [positionMs] of wherever the
-     * index now points.
-     *
-     * How a *new* queue reaches the player, and the last resort for an edit —
-     * it restarts the playing track — too broad to express in place, or one
-     * the server wouldn't take.
+     * Hand the player a whole new queue, cued at [positionMs] of wherever
+     * the index now points. The fallback for an edit too broad to express
+     * in place, or one the server refused; restarts the playing track.
      */
     private suspend fun repushPlexQueue(positionMs: Long = _positionMs.value) {
         val target = _plexPlayer.value ?: return
@@ -1905,9 +1639,9 @@ class PlaybackController(
         val tracks = _queue.value
         if (tracks.isEmpty()) return
         val index = _index.value.coerceIn(0, tracks.lastIndex)
-        // A window around where playback is, not the whole queue — see
-        // [plexWindowEnd]. Enough history behind it that Previous still works
-        // on the player's own remote.
+        // A window around current playback, not the whole queue; see
+        // [plexWindowEnd]. Keeps enough history that Previous still works on
+        // the player's own remote.
         val from = (index - PLEX_WINDOW_BEHIND).coerceAtLeast(0)
         val to = (from + PLEX_WINDOW).coerceAtMost(tracks.size)
         val window = tracks.subList(from, to)
@@ -1929,12 +1663,8 @@ class PlaybackController(
 
     /**
      * Ask the player to push its state here instead of being asked for it.
-     *
-     * Best effort by design: a player may refuse, and a network may not route
-     * back to this phone at all (a guest VLAN, client isolation). Neither is
-     * worth failing a cast over — the poll it falls back to is the same
-     * endpoint Amp used before subscriptions existed — but it is worth saying
-     * which one is running.
+     * Best effort: a player may refuse, or a network may not route back to
+     * this phone (guest VLAN, client isolation). Falls back to polling.
      */
     private suspend fun subscribeToPlexPlayer(client: PlexClient, target: PlexPlayer) {
         val port = plexListener.start(scope)
@@ -1952,12 +1682,9 @@ class PlaybackController(
     }
 
     /**
-     * Hand the player the next stretch of a long queue as it nears the end of
-     * what it has.
-     *
-     * An append is an edit of the queue it already holds, so nothing restarts
-     * — the difference between this and pushing a fresh window, which would
-     * blip every hundred tracks.
+     * Hand the player the next stretch of a long queue as it nears the end
+     * of what it has. An append edits the queue it already holds, so
+     * nothing restarts, unlike pushing a fresh window.
      */
     private suspend fun topUpPlexWindow(client: PlexClient, target: PlexPlayer) {
         val end = plexWindowEnd
@@ -1982,9 +1709,8 @@ class PlaybackController(
     private fun plexVolumeNotOurs(why: String) {
         _plexVolume.value = PlexVolume.NotOurs
         plexVolumeAsked = null
-        // Full, not the phone's last level: what leaves here is a digital
-        // stream at unity gain, and the far end does the attenuating. A bar
-        // showing anything less would be describing a knob nobody is turning.
+        // Shown as full rather than the phone's last level: the stream
+        // leaves at unity gain, and the far end does the attenuating.
         _volume.value = 1f
         android.util.Log.i("AmpPlex", "volume isn't ours — $why; fader disabled at unity")
     }
@@ -2027,16 +1753,15 @@ class PlaybackController(
      * it for progress.
      */
     fun castTo(renderer: DlnaRenderer) {
-        // One route at a time — a Companion cast in progress hands over quietly.
+        // One route at a time; a Companion cast in progress hands over quietly.
         if (_plexPlayer.value != null) stopPlexCasting(resumeLocally = false)
         player?.pause()
         _castRenderer.value = renderer
         val from = _positionMs.value
         castJob?.cancel()
         castJob = scope.launch {
-            // Adopt the renderer's current level so the fader isn't lying — and
-            // move the device's own to match, so the first press of the rocker
-            // nudges from where the speaker is rather than jumping.
+            // Adopt the renderer's current level, and move the device's own
+            // to match, so the rocker starts from where the speaker is.
             DlnaCast.volume(renderer)?.let {
                 _volume.value = it
                 withContext(Dispatchers.Main.immediate) { player?.setSystemVolume(it) }
@@ -2061,20 +1786,11 @@ class PlaybackController(
         val p = player ?: return
         _volume.value = p.deviceVolume.value
         if (resumeLocally) {
-            // The queue moved on while the renderer had it — advanceCast walks
-            // _index as tracks finish there — but this player sat paused on
-            // whatever it held when casting began. Seeking it in place picked
-            // the cast's position inside the *old* track: coming back landed
-            // where you were before casting, not where the speaker left off.
-            // Index and position go in one seek; see LightAudioPlayer.
-            // Rebuilt at that index and position in one call rather than
-            // seeked: a paused player has no duration yet for an item it never
-            // opened, so any plain seek into it clamps to 0 — which is why the
-            // right song came back from the top. Same reason restoreState and
-            // the stream fallback rebuild instead of seeking — and a stream the
-            // player can't seek at all goes through the server; see
-            // rebuildQueueAt, which is where the second restart-from-the-top
-            // came from.
+            // The local player stayed paused on whatever track it held when
+            // casting began, so it must be rebuilt at the current index and
+            // position rather than seeked: a paused player has no duration
+            // yet for an item it never opened, so a plain seek would clamp
+            // to 0. Same reason restoreState rebuilds instead of seeking.
             scope.launch(Dispatchers.Main.immediate) {
                 val tracks = _queue.value
                 if (tracks.isEmpty()) return@launch
@@ -2087,17 +1803,10 @@ class PlaybackController(
     }
 
     /**
-     * Seek within the track the renderer is playing.
-     *
-     * The renderer already has the stream. When that stream can be seeked — the
-     * file itself, served in ranges — a Seek is all it takes: one call, about a
-     * second, and the track carries on from the new position. Pushing the track
-     * again first, as every cast seek did, had the renderer open the stream
-     * afresh and play a burst of it from the top before seeking anyway. The
-     * push stays for the cases that need it: a stream that starts part-way
-     * (the renderer can seek only within what it holds), a transcode (which
-     * nobody can seek, so it is asked for again from the position), and a
-     * renderer that refuses the Seek.
+     * Seek within the track the renderer is playing. A seekable stream (the
+     * file served in ranges) takes one UPnP Seek call. Anything else, a
+     * part-way stream, a transcode, or a renderer that refuses Seek, falls
+     * back to pushing the track again at the new position.
      */
     private suspend fun seekCast(renderer: DlnaRenderer, ms: Long): Boolean {
         val track = _queue.value.getOrNull(_index.value) ?: return false
@@ -2123,20 +1832,12 @@ class PlaybackController(
     }
 
     /**
-     * A moment after a seek, check the renderer really went there; if not,
-     * ask the server for the track from that position instead.
-     *
-     * Refusing outright is the easy case. The hard one is a renderer that
-     * accepts a Seek it can't honour: a live transcode arrives chunked with no
-     * length, so there is nothing to jump to and it grinds forward through the
-     * encode instead — minutes of silence on a long track. Unlike the local
-     * player, GetPositionInfo reports where the renderer really is, so this is
-     * measurable.
-     *
-     * Seeking into the last few seconds has nothing to verify: the track ends
-     * before the check, the renderer's clock resets, and "landed at 0" read as
-     * a failed seek — which restarted the track from the top, through the
-     * server, just as it was about to end.
+     * A moment after a seek, check the renderer really went there (via
+     * GetPositionInfo); if not, ask the server for the track from that
+     * position instead. A renderer can accept a Seek it can't honor, e.g. a
+     * chunked live transcode with no length to jump to, which otherwise
+     * grinds forward in silence. Skipped near the end of a track, since the
+     * renderer's position resets to 0 there and would read as a failed seek.
      */
     private fun verifyCastSeek(renderer: DlnaRenderer, wanted: Long, url: String) {
         val nearEnd = _durationMs.value > 0 &&
@@ -2148,8 +1849,7 @@ class PlaybackController(
             delay(CAST_SEEK_VERIFY_MS)
             if (generation != seekGeneration) return@launch
             if (_castRenderer.value?.id != renderer.id) return@launch
-            // Moved on — the renderer finished it, or a skip did — so the
-            // seek has nothing left to be measured against.
+            // Moved on, so the seek has nothing left to measure against.
             if (_index.value != seekedIndex || castCurrentUrl != url) return@launch
             val info = DlnaCast.position(renderer) ?: return@launch
             if (info.trackUri != null && info.trackUri != url) return@launch
@@ -2167,17 +1867,9 @@ class PlaybackController(
 
     /**
      * Push the queue's current track to the renderer, optionally seeking in.
-     *
-     * Seeking is the renderer's job first. It has the stream, and any response
-     * with a length and byte ranges — which includes anything a server hands
-     * over untranscoded — it can seek by itself, instantly and without
-     * re-fetching. Only when it refuses is the seek handed to the server as a
-     * `timeOffset`, and [askServer] says that has already been tried.
-     *
-     * Inferring it from the format was wrong in the one case that matters:
-     * asking for mp3 when the file is already mp3 gets the file untouched, and
-     * the server then ignores timeOffset because it isn't transcoding. The
-     * track restarted from the top while the readout claimed the seek landed.
+     * The renderer tries to seek itself first (any response with a length
+     * and byte ranges supports this); only on refusal is the seek handed to
+     * the server as a `timeOffset`, tracked by [askServer].
      */
     private suspend fun startCastTrack(
         renderer: DlnaRenderer,
@@ -2186,22 +1878,19 @@ class PlaybackController(
     ): Boolean {
         val track = _queue.value.getOrNull(_index.value) ?: return false
         // A new track on the renderer is a new session, same as the local
-        // player's — see the index collector in bind(). Also covers a seek,
-        // which restarts the renderer's stream from scratch the same way a
-        // track change does, so the session it's replacing needs closing too.
+        // player's; see the index collector in bind(). Also covers a seek,
+        // since it restarts the renderer's stream the same way a track
+        // change does.
         openSessionFor(track.id)
         val (format, mime) = castFormatFor(renderer, track)
         // Anything under a second is where the track starts anyway, and a
         // timeOffset of 0 is a re-encode for nothing.
         val wanted = if (seekToMs > 1_000L) seekToMs else 0L
         val offset = if (askServer) wanted else 0L
-        // No estimated length for a renderer. Navidrome derives the estimate from
-        // duration x the *cap* bitrate, but its ffmpeg output is ABR and comes in
-        // well under: a 100s track declared 3,091,660 bytes and delivered
-        // 2,817,871. A UPnP renderer takes that declaration for the extent of the
-        // stream and stops at the length it implies — about 23 seconds early on
-        // that track. Chunked is honest: it plays to the end of the audio, and the
-        // duration it displays comes from the DIDL metadata either way.
+        // No estimated length for a renderer: Navidrome's estimate assumes
+        // the cap bitrate, but its actual ABR encode comes in smaller, so a
+        // UPnP renderer that trusts the declared length stops the stream
+        // early. Chunked plays to the real end of the audio.
         val url = serverClient.value?.streamUrl(
             track,
             format,
@@ -2226,12 +1915,8 @@ class PlaybackController(
         _positionMs.value = wanted
         castStartedAtMs = wanted
         if (offset == 0L && wanted > 0L) {
-            // A stream the server won't serve in ranges cannot be seeked by
-            // anyone, so asking the renderer buys nothing but the four seconds
-            // it takes to notice — which the listener spends hearing the wrong
-            // part of the track. Ask the stream instead, and when it says no,
-            // go straight to the server. Measured per track, because the same
-            // format is a transcode for one file and the file itself for
+            // Check seekability before asking the renderer to seek, since the
+            // same format is a transcode for one file and the file itself for
             // another; see DlnaCast.supportsRanges.
             val seekKey = "${track.id}|${format.id}"
             val seekable = castSeekable[seekKey] ?: probeSeekable(track, format, seekKey)
@@ -2239,8 +1924,7 @@ class PlaybackController(
             if (seekable == false) {
                 return startCastTrack(renderer, wanted, askServer = true)
             }
-            // Whether it then went there is checked a moment later — see
-            // verifyCastSeek.
+            // Checked a moment later; see verifyCastSeek.
             if (!DlnaCast.seek(renderer, wanted)) {
                 android.util.Log.i("AmpCast", "renderer refused seek → server")
                 return startCastTrack(renderer, wanted, askServer = true)
@@ -2250,22 +1934,18 @@ class PlaybackController(
         announceNowPlaying()
         castCurrentUrl = url
         castSeekPending = -1L
-        // SetAVTransportURI leaves the next slot empty, and it stays that way
-        // until this track is nearly over — see armNextIfDue.
+        // SetAVTransportURI leaves the next slot empty until this track is
+        // nearly over; see armNextIfDue.
         castNextUrl = null
         castNextArmedFor = null
         return true
     }
 
     /**
-     * Ask the server whether this track's stream can be seeked, and remember it.
-     *
-     * Deliberately **not** the URL the renderer is playing. That one carries the
-     * session identifier, and a second request bearing the same one has Plex
-     * tear the first down — it would answer the question by stopping the music.
-     * Without an identifier the probe gets a transcode of its own, which it
-     * closes immediately, and the answer is the same either way: whether the
-     * server transcodes depends on the file and the format, not on who asked.
+     * Ask the server whether this track's stream can be seeked, and
+     * remember it. Deliberately not the URL the renderer is playing: that
+     * one carries the session id, and a second request with the same id
+     * would make Plex tear down the first, stopping the music.
      */
     private suspend fun probeSeekable(
         track: Track,
@@ -2281,35 +1961,26 @@ class PlaybackController(
     }
 
     /**
-     * Hand over the following track once the current one is nearly finished.
-     *
-     * The renderer opens the queued track's HTTP stream the instant it is given
-     * one — the server logs the request a second after SetNextAVTransportURI,
-     * not when the track eventually starts — and then plays from that same
-     * connection however much later. Handed over at the start of a five-minute
-     * track, the stream sits open and undrained for five minutes with the
-     * server's transcoder writing into it, and by the time the renderer wants it
-     * the connection has rotted: either it yields nothing, and the hand-off
-     * arrives STOPPED, or it yields what was buffered and cuts out part-way
-     * through. Both were seen on the Denon, minutes apart, from this one cause.
+     * Hand over the following track once the current one is nearly
+     * finished. A renderer opens the stream it's given immediately, so
+     * handing it over too early leaves the connection open and idle long
+     * enough that the server's transcoder output rots before playback
+     * reaches it.
      */
     private suspend fun armNextIfDue(renderer: DlnaRenderer) {
         val total = _durationMs.value
-        // A track of unknown length (zero) still gets its hand-off: arming early
-        // is this bug, but never arming at all is a gap on every single track.
+        // A track of unknown length (zero) still gets its hand-off, since
+        // never arming at all would be a gap on every track.
         if (total > 0L && total - _positionMs.value > CAST_PREQUEUE_LEAD_MS) return
         queueNextOnRenderer(renderer)
     }
 
     /**
-     * Hand the renderer the following track so it can cross into it seamlessly.
-     *
-     * Records the URL under [castNextUrl] so the poller can recognise the
-     * hand-off when it happens: the renderer switches on its own, and the only
-     * evidence is that GetPositionInfo starts reporting the other URI.
-     *
-     * Call through [armNextIfDue] rather than directly — handing a renderer the
-     * next stream too early is what this whole path had to be rebuilt around.
+     * Hand the renderer the following track so it can cross into it
+     * seamlessly. Records the URL under [castNextUrl] so the poller can
+     * recognise the hand-off: the renderer switches on its own, and the
+     * only evidence is GetPositionInfo reporting the other URI. Call only
+     * through [armNextIfDue], never directly.
      */
     private suspend fun queueNextOnRenderer(renderer: DlnaRenderer) {
         val after = nextCastIndex()
@@ -2319,13 +1990,11 @@ class PlaybackController(
             castNextArmedFor = null
             return
         }
-        // Offered once per track. Asking again neither opens a new stream nor
-        // changes the renderer's mind, and each attempt nulls the very field the
-        // hand-off is recognised by until the SOAP call comes back.
+        // Offered once per track only.
         if (castNextArmedFor == after) return
         val (format, mime) = castFormatFor(renderer, track)
-        // Its own id, not the current track's: both transcodes are in flight
-        // at once during the hand-off, and Plex tears down whichever one
+        // Its own id, not the current track's: both transcodes are in
+        // flight at once during the hand-off, and Plex tears down whichever
         // shares an identifier with the other.
         val url = serverClient.value
             ?.streamUrl(track, format, estimateContentLength = false, sessionId = sessionIdFor(track.id))
@@ -2342,8 +2011,8 @@ class PlaybackController(
             durationMs = track.durationMs,
             mimeType = mime,
         )
-        // Renderers that don't implement it fault; the stop-and-restart path then
-        // carries the queue as it did before.
+        // Renderers that don't implement it fault; the stop-and-restart path
+        // then carries the queue as before.
         if (queued) castNextUrl = url
     }
 
@@ -2359,17 +2028,14 @@ class PlaybackController(
     }
 
     /**
-     * Format to cast in: the user's chosen streaming quality, honoured as long as
-     * the renderer can actually decode what the *server* will send.
-     *
-     * Deliberately not an upgrade — choosing MP3 in settings means MP3 goes to the
-     * speaker too. Two things make this trickier than it looks, and both are
-     * load-bearing:
-     *  - the format name in the URL doesn't fix the container (a "flac" transcode
-     *    can arrive as Ogg-FLAC), so the MIME type is probed from the server;
-     *  - an unsupported format doesn't error, the renderer just stalls, so we fall
-     *    back to MP3 whenever the device's sink list doesn't cover that MIME.
-     * If the device won't list its formats, the user's choice wins.
+     * Format to cast in: the user's chosen streaming quality, honoured as
+     * long as the renderer can decode what the server will actually send.
+     * The format name in the URL doesn't fix the container (a "flac"
+     * transcode can arrive as Ogg-FLAC), so the MIME type is probed from
+     * the server. An unsupported format doesn't error, the renderer just
+     * stalls, so this falls back to MP3 when the sink list doesn't cover
+     * the probed MIME. If the device won't list its formats, the user's
+     * choice wins.
      */
     private suspend fun castFormatFor(
         renderer: DlnaRenderer,
@@ -2421,46 +2087,35 @@ class PlaybackController(
     }
 
     /**
-     * Mirror the renderer's clock into the UI and advance the queue when a track
-     * finishes — a renderer only ever holds one URI, so gapless hand-off has to
-     * be driven from here.
+     * Mirror the renderer's clock into the UI and advance the queue when a
+     * track finishes. A renderer only ever holds one URI, so gapless
+     * hand-off has to be driven from here.
      */
     private suspend fun pollRenderer(renderer: DlnaRenderer, playedBefore: Boolean = false) {
         var settled = false
-        // Whether a stop can only mean the track ended. A track pushed again
-        // for a seek was playing a moment ago; it has nothing to prove, and a
-        // stop after the seek is the end of it — or the seek killed it, which
-        // going on from is also the right answer. Without this the stop came
-        // before any poll had seen PLAYING, counted as a track that never
-        // started, and restarted it from the top after a six-second wait.
+        // A track pushed again for a seek was already playing, so a stop
+        // right after counts as the track ending rather than never starting.
         var played = playedBefore
-        // What the renderer said last time. A position that hasn't moved is not
-        // evidence that anything is playing — see below.
+        // A position that hasn't moved is not evidence anything is playing.
         var lastPositionMs = -1L
-        // The queue index we have already tried to start by hand, so a track
-        // that refuses to play is asked once and then passed over rather than
-        // restarted for ever.
+        // Tracks a manual-start attempt, so a track that refuses to play is
+        // asked once and then passed over rather than retried forever.
         var startedIndex = -1
-        // How patient to be with a track that hasn't started. A stream being
-        // opened from scratch deserves a few seconds; one the renderer has
-        // *already* taken from the queue and stopped on does not — see the
-        // hand-off below.
+        // A stream opened from scratch deserves a few seconds of patience; a
+        // track already handed off and stopped on does not; see the hand-off
+        // branch below.
         var restartAfter = STALLED_POLLS_TO_RESTART
-        // A renderer reports STOPPED for a moment while it re-buffers as well as
-        // at the end of a track, and the two are indistinguishable from one poll.
-        // Two in a row is: the stream really has ended. Readings that went
-        // unanswered are counted separately — see CastStallCounter.
+        // STOPPED can mean re-buffering or a real end, indistinguishable
+        // from a single poll; two in a row means the stream really ended.
         val stall = CastStallCounter()
         while (coroutineContext.isActive && _castRenderer.value?.id == renderer.id) {
             delay(CAST_POLL_MS)
             val position = DlnaCast.position(renderer)
             val state = DlnaCast.state(renderer)
             if (position != null) {
-                // The renderer crossed into the track we queued: follow it here
-                // rather than driving it, so nothing interrupts the audio.
-                // Repeat-one queues the track that's already playing, so a URI
-                // match on its own proves nothing — it has to be a *different*
-                // URI from the one we started.
+                // Follow the renderer's own hand-off to the next track rather
+                // than driving it. Must be a different URI from the one we
+                // started, since repeat-one queues the same track again.
                 val moved = castNextUrl != null &&
                     castNextUrl != castCurrentUrl &&
                     position.trackUri == castNextUrl
@@ -2474,34 +2129,24 @@ class PlaybackController(
                     _durationMs.value = _queue.value.getOrNull(_index.value)?.durationMs
                         ?: _durationMs.value
                     announceNowPlaying()
-                    // The slot the renderer just consumed is empty again, and is
-                    // left that way until this track is nearly over.
+                    // Left empty until this track is nearly over.
                     castNextUrl = null
                     castNextArmedFor = null
                     stall.reset()
-                    // The renderer has *taken* the queued track but not started
-                    // it: for a second or two it reports STOPPED while it opens
-                    // the stream, and reports the finished track's position
-                    // while doing so. Both of those read as "this track just
-                    // ended" — which is what skipped the track that had only
-                    // just begun. Unsettling it puts the new track back under
-                    // the same protection a track gets when it first starts,
-                    // and the rest of this poll is about the old one, so there
-                    // is nothing here worth reading.
+                    // Reset so the new track gets the same startup grace a
+                    // track gets when it first starts; the renderer can
+                    // report STOPPED at the old position for a moment while
+                    // opening the new stream, which otherwise reads as an end.
                     settled = false
                     played = false
-                    // Seeded with the reading we just saw, not cleared: cleared,
-                    // the next identical stale reading looks like a change and
-                    // re-arms the very flag this is putting down.
+                    // Seeded with the current reading, not cleared, so the
+                    // same stale value next poll doesn't look like a change.
                     lastPositionMs = position.positionMs
                     _positionMs.value = 0L
-                    // A hand-off that worked has the renderer already PLAYING the
-                    // new stream at this very poll, its position back at zero —
-                    // that is the gapless case, and nothing here should touch it.
-                    // A dead one has it stopped, still holding the finished
-                    // track's position, and it has never once recovered on its
-                    // own. So give that one a single further poll to prove
-                    // otherwise rather than the seconds a cold stream needs.
+                    // A successful gapless hand-off has the renderer already
+                    // PLAYING at position zero. A dead one sits stopped on the
+                    // old position and never recovers on its own, so give it
+                    // only one further poll before restarting.
                     restartAfter = if (state == DlnaState.PLAYING) {
                         STALLED_POLLS_TO_RESTART
                     } else {
@@ -2509,28 +2154,20 @@ class PlaybackController(
                     }
                     continue
                 }
-                // Only what the renderer says about *our* track. Between one
-                // stream and the next it goes on reporting the last one — a
-                // frozen position, sometimes for seconds — and reading that as
-                // ours put the finished track's time on the new track's bar:
-                // eighteen minutes into a thirty-seven second song, when the
-                // offset we had seeked to was added on top.
+                // Only trust readings about our own track: between streams
+                // the renderer can keep reporting the old one's frozen
+                // position for a poll or two.
                 val ours = position.trackUri == null || position.trackUri == castCurrentUrl
                 if (ours) {
-                    // Until this track has settled, only a reading near where
-                    // it was started is believed: a renderer reports the new
-                    // URI with the *old* clock for a poll or two while it opens
-                    // the stream, and the finished track's 0:42 was flashing
-                    // onto a track that hadn't begun.
+                    // Until settled, only a reading near the start point is
+                    // believed, since the renderer can report the new URI
+                    // with the old clock briefly while opening the stream.
                     val reading = position.positionMs + castOffsetMs
                     val pending = castSeekPending
                     if (pending >= 0L) {
-                        // A seek is in flight. The renderer goes on reporting
-                        // the old clock for a poll or two while it reopens the
-                        // stream at the new position, and shown, that is the
-                        // bar jumping back to where it was and forward again.
-                        // Nothing is believed until a reading near the target;
-                        // if none ever comes, the seek's own check re-pushes.
+                        // A seek is in flight; only a reading near the target
+                        // is trusted. If none ever comes, the seek's own
+                        // check re-pushes.
                         if (kotlin.math.abs(reading - pending) <= CAST_START_WINDOW_MS) {
                             castSeekPending = -1L
                             _positionMs.value = reading
@@ -2538,19 +2175,14 @@ class PlaybackController(
                     } else if (settled || kotlin.math.abs(reading - castStartedAtMs) <= CAST_START_WINDOW_MS) {
                         _positionMs.value = reading
                     }
-                    // The renderer only knows about the piece of the track it was
-                    // given, so a stream that started part-way in reports a short
-                    // duration. The track's own is the honest number.
+                    // A stream that started part-way in reports a short
+                    // duration, so only trust it when there's no offset.
                     if (castOffsetMs == 0L && position.durationMs > 0) {
                         _durationMs.value = position.durationMs
                     }
-                    // What counts as "this track has started": the renderer
-                    // saying PLAYING (below), or a position that has *moved*
-                    // while it is not stopped. A stopped renderer's position is
-                    // never evidence of playing, whatever number it holds —
-                    // through a hand-off it keeps reporting the finished track's
-                    // last position, and reading that as a start is what let the
-                    // next track's loading silence count as that track ending.
+                    // A stopped renderer's position is never evidence the
+                    // track has started, since it keeps reporting the
+                    // finished track's last position through a hand-off.
                     if (state != DlnaState.STOPPED &&
                         position.positionMs > 0 &&
                         position.positionMs != lastPositionMs
@@ -2570,9 +2202,7 @@ class PlaybackController(
                 else -> Unit
             }
             when {
-                // Played, then stopped: the track ended. Move on. Only readings
-                // the renderer actually gave us count here — going quiet must
-                // never cost a track that was playing perfectly well.
+                // Played, then stopped: the track ended.
                 (settled || played) && stall.stopped >= STOPPED_POLLS_TO_ADVANCE -> {
                     android.util.Log.i("AmpCast", "ended idx=${_index.value} → advance")
                     if (!advanceCast(renderer)) return
@@ -2582,15 +2212,10 @@ class PlaybackController(
                     startedIndex = -1
                     restartAfter = STALLED_POLLS_TO_RESTART
                 }
-                // Never played at all. This renderer takes the track we queue
-                // ahead of time, transitions to it — and then sits there
-                // stopped, for ever. It is why tracks appeared to be skipped:
-                // the miscounted stops that followed made us advance *past* the
-                // track it had just loaded, so what was really a dead hand-off
-                // sounded like a jump. Start it ourselves rather than stepping
-                // over it. A renderer that has stopped answering counts too:
-                // nothing is playing either way, and this is the decision that
-                // can afford to be wrong.
+                // Never played at all: a renderer can take a queued-ahead
+                // track and then sit stopped on it forever. Start it rather
+                // than advancing past it. Also covers a renderer that has
+                // stopped answering.
                 !settled && !played &&
                     stall.notPlaying >= restartAfter &&
                     startedIndex != _index.value -> {
@@ -2600,9 +2225,7 @@ class PlaybackController(
                     restartAfter = STALLED_POLLS_TO_RESTART
                     if (!startCastTrack(renderer)) return
                 }
-                // Asked again and it still won't play: something is wrong with
-                // this track rather than with the hand-off, and sitting in
-                // silence is worse than going on.
+                // Asked again and it still won't play: skip the track.
                 !settled && !played &&
                     stall.notPlaying >= restartAfter &&
                     startedIndex == _index.value -> {
@@ -2613,29 +2236,15 @@ class PlaybackController(
                     restartAfter = STALLED_POLLS_TO_RESTART
                 }
             }
-            // Late enough in the track that the renderer can be handed the next
-            // one without the stream going stale before it is wanted.
             armNextIfDue(renderer)
         }
     }
 
     /**
-     * Rebuild the queue's sources when the answer to "file or stream?" may have
-     * changed.
-     *
-     * That question is answered per track by [source], and until now it was
-     * answered exactly once — when the queue was built — and then frozen into
-     * it. Everything the answer depends on can move while that same queue is
-     * still playing: Wi-Fi goes away, a download finishes, the data mode
-     * changes. A queue built on Wi-Fi therefore went on asking the network for
-     * tracks that were by then sitting on the disk, which offline means stalling
-     * for a socket timeout on every one of them, and looks from the outside like
-     * an app that has simply stopped working.
-     *
-     * The playing item is deliberately left alone. Replacing it would restart
-     * the track under the listener, which is a worse thing to do than letting
-     * one track finish on the source it began with — everything after it is
-     * corrected, which is where the stalls were.
+     * Rebuild the queue's sources when the answer to "file or stream?" may
+     * have changed (Wi-Fi state, a finished download, a data mode change).
+     * The playing item is left alone, since replacing it would restart the
+     * track; everything after it is corrected.
      */
     private fun reresolveQueue() {
         val p = player ?: return
@@ -2643,12 +2252,12 @@ class PlaybackController(
         val tracks = _queue.value
         if (tracks.isEmpty()) return
         val current = _index.value.coerceIn(0, tracks.lastIndex)
-        // Nothing to say unless something actually moves — this runs on every
-        // download that completes, and most of them change no answers at all.
+        // Skip unless something actually changed; this runs on every
+        // completed download, most of which change nothing here.
         val rebuilt = tracks.map { it.source() }
         if (rebuilt == queuedSources) return
         queuedSources = rebuilt
-        // ExoPlayer's looper is Main and it enforces that — see restoreState.
+        // ExoPlayer's looper is Main-only; see restoreState.
         scope.launch(Dispatchers.Main.immediate) {
             if (current > 0) {
                 p.replaceRange(0, current, tracks.subList(0, current).map { it.toAudioItem() })
@@ -2694,26 +2303,22 @@ class PlaybackController(
         queuedSources = tracks.map { it.source() }
         p.setMediaQueue(tracks.map { it.toAudioItem() }, startIndex)
         _index.value = startIndex
-        // A new queue plays from the start of whatever it opens on. Any offset
-        // still set belongs to a stream that was seeked before this one, and
-        // would be added to the clock of a track starting at 0:00 — which is how
-        // a song opens at 0:49 with the audio at the very beginning. The index
-        // collector can't be relied on to clear it: it only fires when the index
-        // *changes*, and a new queue often starts on the same one.
+        // A leftover offset from a previous seek would get added to this new
+        // track's clock. Cleared explicitly since the index collector only
+        // fires on an index change, and a new queue often starts on the same
+        // index.
         streamOffsetMs = 0
         // Every slot of a new queue is a full item; nothing is left to restore.
         offsetItemTrackId = null
         // Picking something new to play is reason enough to try the server again.
         streamFailed.clear()
-        // Right from the first frame, rather than whenever the stream gets round
-        // to declaring a length — see the durationMs collector in ensurePlayer.
+        // Seeded immediately rather than waiting on the stream to declare a
+        // length; see the durationMs collector in ensurePlayer.
         tracks.getOrNull(startIndex)?.durationMs
             ?.takeIf { it > 0L }
             ?.let { _durationMs.value = it }
-        // A new queue goes wherever the sound is already going. Without this it
-        // started here while the Companion player carried on with the queue it
-        // still owned — two songs at once, and the Output page still naming the
-        // TV. From the top, not the old queue's position.
+        // A new queue follows wherever sound is already going, rather than
+        // starting here while a Companion player keeps playing its own queue.
         if (_plexPlayer.value != null) {
             p.pause()
             _positionMs.value = 0L
@@ -2740,16 +2345,9 @@ class PlaybackController(
     }
 
     /**
-     * A stream died — carry on from the downloaded copy, at the same second.
-     *
-     * Losing the network mid-track otherwise just stops the music: the player
-     * reports an error, playback ends, and the user is left tapping play on a URL
-     * that will keep failing. Where the track is downloaded, this rebuilds the
-     * queue against local files and resumes at the position that was reached, so
-     * walking out of Wi-Fi sounds like nothing happened.
-     *
-     * [forceOffline] latches until the server answers again, because the very
-     * next track would otherwise be resolved to a URL and fail in the same way.
+     * A stream died; carry on from the downloaded copy, at the same
+     * position, if there is one. [forceOffline] latches until the server
+     * answers again, since the next track would otherwise fail the same way.
      */
     private fun fallBackOffline(serverAnswered: Boolean) {
         val p = player ?: return
@@ -2763,9 +2361,8 @@ class PlaybackController(
         if (retriedTrackId == track.id) return
         retriedTrackId = track.id
         streamFailed += track.id
-        // Only a server that never answered is grounds for pinning *everything*
-        // to local files. That latch is released when the server answers again —
-        // which never happens if we never called it unreachable.
+        // Only a server that never answered justifies pinning everything to
+        // local files; the latch releases when the server answers again.
         if (!serverAnswered) forceOffline = true
         val resumeAt = _positionMs.value
         scope.launch(Dispatchers.Main.immediate) {
@@ -2775,21 +2372,16 @@ class PlaybackController(
     }
 
     /**
-     * Tell the server this session is playing, paused or stopped — see
-     * [MusicServer.reportTimeline]. Fire-and-forget: a dropped heartbeat just
-     * means the dashboard is stale until the next one, not a broken stream.
+     * Tell the server this session is playing, paused or stopped. See
+     * [MusicServer.reportTimeline]. Fire-and-forget: a dropped heartbeat
+     * just leaves the dashboard stale until the next one.
      */
     private fun reportTimeline(state: TimelineState) {
-        // A Companion player reports its own timeline to the server — that is
-        // its scrobble, and this phone adding another would double every play.
+        // A Companion player reports its own timeline directly; a second
+        // report from here would double every play.
         if (_plexPlayer.value != null) return
         val track = _queue.value.getOrNull(_index.value) ?: return
-        // Nothing playing on the server's behalf to report on.
         if (LocalLibrary.isLocal(track.id)) return
-        // Wi-Fi Only on a metered link means don't. A heartbeat is worth no
-        // cellular data and nothing is lost by skipping it: it says where
-        // playback is *now*, so a stale one replayed later would be worse than
-        // none. The play itself is kept — see maybeSubmitPlay.
         if (!metadataAllowed()) return
         val client = serverClient.value ?: return
         val sid = sessionIdFor(track.id)
@@ -2799,19 +2391,15 @@ class PlaybackController(
     }
 
     /**
-     * Close out the session for a track that has stopped being the one playing.
-     *
-     * Without it the old session sits in `/status/sessions` until its lease
-     * times out on its own, and a track change every few minutes makes them pile
-     * up faster than they expire. Takes the track explicitly, because by the
-     * time this runs the queue has usually moved on to the next one.
+     * Close out the session for a track that has stopped being the one
+     * playing, otherwise it sits in `/status/sessions` until its lease
+     * times out. Takes the track explicitly since the queue has usually
+     * already moved on by the time this runs.
      */
     private fun reportTimelineStopped(oldTrackId: String) {
         if (LocalLibrary.isLocal(oldTrackId)) return
-        // Gated here as well as in reportTimeline: these two close a session by
-        // calling the client straight out, so the gate on the wrapper never saw
-        // them and "state=stopped&time=0" kept arriving over cellular in a mode
-        // that forbids it. Every route to the server needs its own answer.
+        // Gated here too, since this calls the client directly rather than
+        // through reportTimeline's gate.
         if (!metadataAllowed()) return
         val client = serverClient.value ?: return
         val sid = sessionIdFor(oldTrackId)
@@ -2823,10 +2411,9 @@ class PlaybackController(
     }
 
     /**
-     * Hand the open session over to [newTrackId], stopping the outgoing one.
-     *
-     * The id itself is derived from the track rather than minted here — see
-     * [sessionIdFor] — so this only tracks *which* session is currently open.
+     * Hand the open session over to [newTrackId], stopping the outgoing
+     * one. The id itself comes from [sessionIdFor]; this only tracks which
+     * session is currently open.
      */
     private fun openSessionFor(newTrackId: String) {
         val outgoing = sessionTrackId
@@ -2836,18 +2423,14 @@ class PlaybackController(
     }
 
     /**
-     * Say what is playing, the moment it starts.
-     *
-     * Not the same statement as the play itself — see [MusicServer.scrobble].
-     * Nothing is kept for a retry: a now-playing notice replayed an hour later
-     * is simply false, where a play is still true whenever it arrives.
+     * Say what is playing, the moment it starts. Distinct from a play
+     * submission; see [MusicServer.scrobble]. Not retried on failure,
+     * since a now-playing notice replayed later would simply be false.
      */
     private fun announceNowPlaying() {
-        // The Companion player is the one playing; the server hears it from them.
+        // The Companion player reports its own now-playing state directly.
         if (_plexPlayer.value != null) return
         val track = _queue.value.getOrNull(_index.value) ?: return
-        // Nothing to tell, and nowhere to keep a play count: a local file's
-        // history would be invented by this app and restorable by nothing.
         if (LocalLibrary.isLocal(track.id)) return
         if (track.id == nowPlayingId) return
         nowPlayingId = track.id
@@ -2859,33 +2442,21 @@ class PlaybackController(
     }
 
     /**
-     * How much of a track has to be heard before the play counts.
-     *
-     * Half of it, or four minutes, whichever comes first — the rule Last.fm
-     * applies at the far end of whatever the server forwards to. A track whose
-     * length nothing has reported yet falls back to the four minutes; that only
-     * happens on a stream that never declares one.
+     * How much of a track has to be heard before the play counts: half of
+     * it or four minutes, whichever is less (Last.fm's rule). Falls back
+     * to four minutes for a stream that never reports its length.
      */
     private fun submitAfterMs(durationMs: Long): Long =
         if (durationMs <= 0L) SUBMIT_AFTER_MS else minOf(durationMs / 2, SUBMIT_AFTER_MS)
 
-    /**
-     * Submit the play, once enough of the track has actually been heard.
-     *
-     * This used to fire the instant a track started, which meant a queue skimmed
-     * through in ten seconds logged a play for every track in it — in the local
-     * counts that drive Plays sorting, and on whatever the server scrobbles to.
-     *
-     * Gated on [currentListenedMs].
-     */
+    /** Submit the play, once enough of the track has actually been heard; gated on [currentListenedMs]. */
     private fun maybeSubmitPlay() {
         val track = _queue.value.getOrNull(_index.value) ?: return
         if (LocalLibrary.isLocal(track.id)) return
         if (track.id == lastScrobbledId) return
         if (currentListenedMs() < submitAfterMs(_durationMs.value)) return
         lastScrobbledId = track.id
-        // Stamped now, sent whenever: a play that happened offline still belongs
-        // at the time it happened once the server hears about it.
+        // Timestamped now so an offline play keeps its real time once sent.
         val at = System.currentTimeMillis()
         val client = serverClient.value
         scope.launch {
@@ -2901,43 +2472,26 @@ class PlaybackController(
     }
 
     /**
-     * The format to actually request.
-     *
-     * Low Data is about *cellular* data, not quality in general — on Wi-Fi there's
-     * nothing to save, so the user's chosen format applies as normal.
-     *
-     * Off Wi-Fi it clamps to Opus rather than MP3: at 192 kbps Opus is 24 KB/s
-     * against MP3 320's 40 KB/s, so it saves about 40% of the bytes *and* sounds
-     * better. MP3 was only ever the compatibility-safe choice, and this device
-     * decodes Opus fine.
+     * The format to actually request. Low Data only affects cellular; the
+     * chosen Wi-Fi format applies as normal there. Off Wi-Fi, Opus at 192
+     * kbps uses less bandwidth than MP3 320 and sounds better, so the
+     * cellular default is Opus rather than MP3.
      */
     private fun effectiveFormat(): StreamFormat {
-        // From the source rather than the client: the format is a property of
-        // which server you are on, and not every backend carries a config object.
-        //
-        // The connection picks between two stated choices rather than a data
-        // mode quietly capping one. Low Data used to drop anything heavier than
-        // Opus off Wi-Fi, which meant asking for lossless on cellular and being
-        // given something else without being told — the substitution this app
-        // has been getting rid of everywhere else. Whoever wants Opus on
-        // cellular can now say so, and be believed.
+        // Read from the source rather than the client, since the format is
+        // a property of which server the source is, and not every backend
+        // carries a config object.
         val source = App.source.value
         return if (unmetered) source.wifiFormat else source.cellularFormat
     }
 
     /**
-     * Where to play a track from.
-     *
-     * Downloads win by default — that's the point of having them. A download is
-     * abandoned only when the user's chosen streaming format is genuinely better
-     * than the copy on disk, *and* the bytes are free: an unmetered connection,
-     * whatever the mode. Even Make it Hurt — which spends cellular data on
-     * everything else — plays a downloaded track from its file: a copy on the
-     * phone beats paying for the same song again.
+     * Where to play a track from. Downloads win by default. A download is
+     * skipped only when the chosen streaming format is genuinely better
+     * than the downloaded copy and the connection is unmetered.
      */
     private fun Track.source(): LightAudioSource {
-        // A track from the phone's own library is the file, always — there is no
-        // stream to prefer and no server to ask.
+        // A track from the phone's own library is always the file.
         LocalLibrary.fileOf(id)?.let { return LightAudioSource.FileSource(it) }
         val local = localFiles[id]
         if (local != null) {
@@ -2948,23 +2502,10 @@ class PlaybackController(
             if (!preferStream) return LightAudioSource.FileSource(file)
         }
         return LightAudioSource.UrlSource(
-            // No estimated Content-Length, which is what made a long track take
-            // minutes to start.
-            //
-            // To declare a length for a transcode the server has to know the
-            // size, and knowing the size means finishing the encode — so the
-            // wait grew with the track. Measured: 29 minutes of audio took 67.9s
-            // to make a sound, with downloads held off entirely and the link
-            // running at 5 MB/s. That is ~26x realtime, this server's opus rate.
-            // Without the estimate the same 124-minute track starts in 605ms.
-            //
-            // The estimate was here for byte-seeking inside a transcoded stream,
-            // but seekTo doesn't byte-seek — it asks the server for the same
-            // track at a timeOffset. So nothing here needed it.
-            //
-            // Only Subsonic reads the flag; Jellyfin and Plex ignore it. Passing
-            // it here covers every source that ever might, and costs the other
-            // two nothing.
+            // No estimated Content-Length: declaring a length for a
+            // transcode requires the server to finish the encode first,
+            // which stalls playback start for however long the track is.
+            // Only Subsonic reads this flag; Jellyfin and Plex ignore it.
             serverClient.value?.streamUrl(
                 this,
                 effectiveFormat(),
@@ -2975,30 +2516,22 @@ class PlaybackController(
     }
 
     /**
-     * Rebuild the player's queue on [index], cued at [positionMs]. Main only.
-     *
-     * A start position handed to the player at prepare time only lands on a
-     * stream it can seek. A transcode arrives chunked with nothing to seek by,
-     * and ExoPlayer quietly opens it from 0:00 instead — which is how coming
-     * back from the speaker, and reopening the app, began the track over. Those
-     * streams go through the server the way [seekTo] does: the item is built
-     * on a stream that already starts at the position, and [streamOffsetMs]
-     * shifts the readouts. A stream the player can seek keeps the cheap route,
-     * checked afterwards the way a native seek is.
+     * Rebuild the player's queue on [index], cued at [positionMs]. Main
+     * only. A chunked transcode has nothing to seek by, so ExoPlayer would
+     * silently open it from 0:00; those go through the server like
+     * [seekTo] does, with [streamOffsetMs] shifting the readouts. A
+     * seekable stream keeps the cheap native route.
      */
     private fun rebuildQueueAt(p: LightAudioPlayer, tracks: List<Track>, index: Int, positionMs: Long) {
         val track = tracks[index]
         val at = positionMs.coerceAtLeast(0L)
         queuedSources = tracks.map { it.source() }
-        // Set before the player moves: the index collector reads a change as a
-        // new track and would clear the offset this is about to set.
+        // Set before the player moves: the index collector reads a change
+        // as a new track and would clear the offset this is about to set.
         _index.value = index
         _positionMs.value = at
-        // Seeded from the library the way the index collector seeds a track
-        // change — which this path deliberately suppresses by pre-setting
-        // _index. A chunked stream may never report a duration at all, and its
-        // 0 never re-emits, so a restored queue was left with a position and
-        // no end: a full bar and a total of 0:00.
+        // Seeded from the library since the index collector is suppressed
+        // here, and a chunked stream may never report its own duration.
         track.durationMs.takeIf { it > 0L }?.let { _durationMs.value = it }
         val client = serverClient.value
         if (at > 1_000L && client != null && needsServerSeek(track, askPlayer = false)) {
@@ -3041,21 +2574,13 @@ class PlaybackController(
 
     companion object {
         private const val PREVIOUS_RESTART_MS = 3_000L
-        /**
-         * How close a seeked stream's duration has to be to the whole track
-         * before we conclude the server ignored the offset. Generous, because a
-         * transcode's duration is its own estimate.
-         */
+        /** How close a seeked stream's duration must be to the full track's before the offset is judged ignored. */
         private const val IGNORED_OFFSET_SLACK_MS = 3_000L
 
         /** How near the end still counts as having reached it. */
         private const val QUEUE_END_SLACK_MS = 1_000L
 
-        /** Long enough for the player to be reporting the stream, not the request. */
-        /**
-         * How long to wait for Plex to settle a transcode decision before
-         * starting anyway. Short: this sits between the tap and the sound.
-         */
+        /** How long to wait for the server's stream decision before starting anyway. */
         private const val STREAM_DECISION_TIMEOUT_MS = 2_000L
 
         /** Long enough for the player to be reporting the stream, not the request. */
@@ -3081,12 +2606,7 @@ class PlaybackController(
         /** Consecutive silent/stopped polls before a Companion player counts as gone. */
         private const val PLEX_GONE_POLLS = 5
 
-        /**
-         * How much of a long queue a player is given at once, and how much of
-         * it sits behind the playing track. Small enough that the queue's uri
-         * stays a URL rather than a payload — Plex reads it from the request
-         * line — and long enough that a top-up is rare.
-         */
+        /** How much of a long queue a player is given at once, and how much sits behind the playing track. */
         private const val PLEX_WINDOW = 150
         private const val PLEX_WINDOW_BEHIND = 20
 
@@ -3099,7 +2619,7 @@ class PlaybackController(
         /** Silence from a subscribed player before falling back to polling. */
         private const val PLEX_PUSH_SILENCE_MS = 12_000L
 
-        /** Poll interval while the player is paused — its state isn't moving. */
+        /** Poll interval while the player is paused, since its state isn't moving. */
         private const val PLEX_IDLE_POLL_MS = 5_000L
 
         /** Tracks left ahead of the player before the window is topped up. */
@@ -3114,10 +2634,7 @@ class PlaybackController(
         /** Polls a player gets to follow a volume before the fader gives up on it. */
         private const val PLEX_VOLUME_PROBES = 3
 
-        /**
-         * The most tracks the player is ever given at once, and how many already
-         * played are kept behind the starting point.
-         */
+        /** The most tracks the player is ever given at once, and how many already-played ones are kept behind it. */
         private const val MAX_QUEUE = 500
         private const val QUEUE_LOOKBACK = 50
 
@@ -3128,39 +2645,23 @@ class PlaybackController(
         private const val STOPPED_POLLS_TO_ADVANCE = 2
 
         /**
-         * How long a track that has never played is given before we start it
-         * ourselves — see the STOPPED branch in pollRenderer.
-         *
-         * Longer than the advance threshold on purpose: a renderer opening a
-         * fresh stream is legitimately stopped for a few seconds (about three on
-         * the Denon), and this must not fire while it is merely loading.
+         * How long a track that has never played is given before it's
+         * started manually; see the STOPPED branch in pollRenderer. Longer
+         * than the advance threshold, since a renderer opening a fresh
+         * stream is legitimately stopped for a few seconds while loading.
          */
         private const val STALLED_POLLS_TO_RESTART = 6
 
-        /**
-         * The same, for a track the renderer took from the queue and stopped on.
-         *
-         * Nothing is being loaded there — it had the whole of the previous track
-         * to prepare — so a stop at that moment is a hand-off that has already
-         * failed, not one still getting ready.
-         */
+        /** Same as [STALLED_POLLS_TO_RESTART], but for a hand-off track that already had time to prepare. */
         private const val HANDOFF_POLLS_TO_RESTART = 2
 
-        /**
-         * How close to the end of the current track the next one is handed over.
-         *
-         * Long enough for the renderer to open the stream and buffer it — the
-         * Denon takes about three seconds from a cold start — and short enough
-         * that the connection has no time to go stale while it waits. See
-         * [armNextIfDue] for why a stale one is the whole problem.
-         */
+        /** How close to the end of the current track the next one is handed over; see [armNextIfDue]. */
         private const val CAST_PREQUEUE_LEAD_MS = 15_000L
 
         /** Settling time before re-arming the renderer's next track after an edit. */
         private const val CAST_REQUEUE_DEBOUNCE_MS = 400L
         private const val CAST_STOP_TIMEOUT_MS = 1_500L
 
-        /** How often the queue snapshot is written while playing. */
         /** How long a restore waits to learn what is downloaded before deciding. */
         private const val DOWNLOADS_READY_TIMEOUT_MS = 4_000L
 
@@ -3169,22 +2670,11 @@ class PlaybackController(
 
         /** How often a live session is re-announced; PlexAmp uses roughly this. */
         private const val TIMELINE_INTERVAL_MS = 10_000L
-        /**
-         * The far end of "enough of it was heard to count as a play".
-         *
-         * Half the track or this, whichever comes first — Last.fm's rule, and
-         * the one the server will apply to whatever it forwards.
-         */
+
+        /** Upper bound on "enough of it was heard to count as a play" (half the track, if shorter). */
         private const val SUBMIT_AFTER_MS = 4 * 60 * 1000L
 
-        /**
-         * How many tracks of the queue the server is told about.
-         *
-         * An id is around forty characters once it is a URL parameter, so this is
-         * a few kilobytes of request — under the eight that proxies commonly cut
-         * off, and far enough ahead that resuming on another device has somewhere
-         * to go.
-         */
+        /** How many tracks of the queue the server is told about. */
         private const val MAX_SAVED_QUEUE = 100
     }
 }

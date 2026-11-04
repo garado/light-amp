@@ -28,12 +28,8 @@ import com.thelightphone.sdk.ui.LightIcon
 import com.thelightphone.sdk.ui.LightIcons
 
 /**
- * The corner button: what a tap does, and optionally what a hold does.
- *
- * [onLongClick] is declared before [onClick] so the trailing-lambda form every
- * call site uses still names the tap. On library pages the hold is Settings —
- * one gesture from anywhere, the same 900 ms every other hold in the app takes,
- * instead of a gear on every page.
+ * A header corner button. [onLongClick] is declared before [onClick] so the
+ * trailing-lambda call form still names the tap.
  */
 data class HeaderAction(
     val icon: ImageVector,
@@ -42,15 +38,10 @@ data class HeaderAction(
 )
 
 /**
- * Right-hand geometry when a search button is present.
- *
- * Search and now-playing read as a pair, so they sit a half-pitch apart: the
- * now-playing icon keeps the shared [EDGE_INSET_PX] axis (80px in from the right,
- * so centred at 1000px) with the full 120px square around it, and search centres
- * 120px to its left, at 880px, inside an 80px square.
- *
- * The two hit boxes meet at 920px without overlapping: search covers 840–920 and
- * now-playing 920–1080.
+ * Right-hand geometry when a search button is present. The now-playing icon
+ * stays centred at 1000px (80px in from the right edge) in its 120px square;
+ * search centres at 880px in an 80px square. Their hit boxes meet at 920px
+ * without overlapping.
  */
 private const val EDGE_INSET_PX = 80
 private const val SEARCH_SLOT_PX = 80
@@ -59,30 +50,14 @@ private const val NOW_PLAYING_SLOT_PX = 120
 /** Gap between the two icon centres. */
 private const val SEARCH_TO_NOW_PLAYING_PX = 120
 
-/**
- * The corner glyph's own box, in physical pixels — the same 66px the player's
- * header gives its More, so the two corners draw the same size as well as the
- * same shape. The RN app's 26-unit icon came to 66.3px, and a third of a pixel is enough to put a
- * one-pixel stem between two of them and take the edge off it.
- */
+/** Corner glyph box size in physical pixels, matching the player header's icon size. */
 const val CORNER_ICON_PX = 66
 
 /**
- * A header's title, dropped a size only when the full one will not fit.
- *
- * Measured rather than inferred from the length: the face is proportional, so
- * two titles of the same character count are nothing like the same width, and
- * the only honest test is to lay the string out and ask. It is measured in the
- * very style it will be drawn in ([appTextStyle]) — measuring in a near-enough
- * style is answering the question about a different string — and in the room
- * actually left after whatever shares the slot.
- *
- * Measured rather than drawn-then-corrected: laying it out large, noticing the
- * overflow and recomposing smaller would show one frame of the wrong size on
- * every title that needs shrinking.
- *
- * The smaller size is the player's title-card size, so the two places in the app
- * that show a long name agree with each other.
+ * A header title that drops to a smaller size when the full size would
+ * overflow. Overflow is measured directly against the actual render style and
+ * available width, rather than inferred from character count, since the font
+ * is proportional.
  */
 @Composable
 private fun HeaderTitle(title: String, fit: Boolean, roomPx: Int) {
@@ -107,26 +82,21 @@ private fun HeaderTitle(title: String, fit: Boolean, roomPx: Int) {
     )
 }
 
-/** The size a title that will not fit drops to — the player's title card. */
+/** Size a title drops to when it doesn't fit; matches the player's title card. */
 private const val SUBPAGE_TITLE_PX = 45
 private const val SUBPAGE_TITLE_LINE_PX = 54
 
 /**
- * Header height in LP3 pixels — 120px, the same 4 grid units as the bottom bars.
- *
- * Fixed rather than derived from `screenHeight − screenWidth`: that formula gives
- * 120px on the LP3 but a smaller value wherever the reported height excludes
- * insets (the emulator), which made the edge buttons stop being 120×120 squares.
- * On the LP3 this is the same number, and it also leaves the content area exactly
- * 1080 × 1080 — a full-width square for artwork.
+ * Header height in LP3 pixels. Fixed rather than derived from
+ * `screenHeight - screenWidth`, because that value excludes insets on some
+ * devices (the emulator) and breaks the 120x120 corner squares.
  */
 const val HEADER_BAR_PX = 120
 
 /**
- * The header every page wears: a [HEADER_BAR_PX] band with a full-height square
- * at each end so hit zones line up. Left is back or a custom action, centre is a
- * title or custom content, right is an optional action; a search icon can sit
- * left of the right action.
+ * Standard page header: a [HEADER_BAR_PX] band with a full-height square at
+ * each end. Left is back or a custom action, center is a title or custom
+ * content, right is an optional action; a search icon can sit left of it.
  */
 @Composable
 fun AppHeader(
@@ -138,34 +108,19 @@ fun AppHeader(
     searchAction: (() -> Unit)? = null,
     /** What the [searchAction] slot draws; the slot's geometry never changes. */
     searchIcon: ImageVector = AppIcons.Search,
-    /**
-     * A second left-hand button, in the mirror image of the search slot.
-     *
-     * Used by the library's liked/all switch, which pairs with the sort button
-     * exactly as search pairs with now-playing on the other side.
-     */
+    /** A second left-hand button, mirroring the search slot on the right. */
     secondaryLeftAction: HeaderAction? = null,
-    /**
-     * Let a title that will not fit drop to a smaller size rather than being cut.
-     *
-     * Library pages only, and off by default: elsewhere the titles are the app's
-     * own short words, where a second size would be variation without a reason.
-     */
+    /** Let a title that doesn't fit drop to a smaller size instead of being cut. */
     fitTitle: Boolean = false,
 ) {
-    // Left and right slots are 120px squares, so their hit boxes match the
-    // transport's and the icons land on the shared 80px axis. The right slot
-    // narrows when search is present (see the constants above).
     val headerHeight = px(HEADER_BAR_PX)
     val hasSearch = searchAction != null
-    // Now-playing keeps a full 120px square centred on its own icon, so no shift.
     val rightSlot = if (hasSearch) px(NOW_PLAYING_SLOT_PX) else headerHeight
-    // Search centres SEARCH_TO_NOW_PLAYING_PX to its left; the right slot already
-    // reaches half its width past that centre, so this is the leftover gap.
+    // Gap between the search slot and the now-playing slot centres.
     val searchGap = px(SEARCH_TO_NOW_PLAYING_PX - NOW_PLAYING_SLOT_PX / 2 - SEARCH_SLOT_PX / 2)
-    // Each side's extra width beyond its 120px corner square. Whichever side has
-    // less gets the difference as a spacer, so the title stays centred on screen
-    // whether one, both or neither of the inner slots is present.
+    // Extra width beyond the 120px corner square; applied as a spacer on
+    // whichever side lacks it, so the title stays centred regardless of which
+    // optional slots are present.
     val extraSlot = px(SEARCH_SLOT_PX) + searchGap
     val zero = 0.dp
     val leadingSpacer = if (hasSearch && secondaryLeftAction == null) extraSlot else zero
@@ -178,18 +133,12 @@ fun AppHeader(
         HeaderSquare(headerHeight, onClick = leftAction?.onClick ?: onBack) {
             when {
                 leftAction != null -> AppIcon(leftAction.icon, size = px(71))
-                // The phone's own chevron, in the 80px box LightOS gives it,
-                // centred in the corner square — which lands it at x=48–82,
-                // exactly where the stock tools' headers draw theirs.
                 onBack != null -> LightIcon(LightIcons.BACK, size = 2f)
                 else -> {}
             }
         }
 
         if (secondaryLeftAction != null) {
-            // The mirror of the search slot: an 80px square hard against the
-            // corner square, so its glyph centres 200px from the left edge just
-            // as search centres 200px from the right.
             Spacer(Modifier.width(searchGap).height(headerHeight))
             HeaderSlot(
                 px(SEARCH_SLOT_PX),
@@ -208,17 +157,12 @@ fun AppHeader(
             val room = constraints.maxWidth
             when {
                 titleContent != null -> titleContent()
-                // The title names the page and does nothing else. It used to
-                // open a menu, marked by a chevron beside it — an affordance
-                // small enough to miss, for one of three scattered ways into
-                // what is now a single list of rows on More.
                 title != null -> HeaderTitle(title, fitTitle, room)
                 else -> {}
             }
         }
 
         if (searchAction != null) {
-            // An 80px square, not the full header height, per the design.
             HeaderSlot(px(SEARCH_SLOT_PX), px(SEARCH_SLOT_PX), onClick = searchAction) {
                 AppIcon(searchIcon, size = px(66))
             }
@@ -247,7 +191,7 @@ private fun HeaderSlot(
     width: Dp,
     height: Dp,
     onClick: (() -> Unit)?,
-    /** A hold, where the slot has one — the same slow press every row uses. */
+    /** A hold, where the slot has one. Same long-press duration every row uses. */
     onLongClick: (() -> Unit)? = null,
     content: @Composable () -> Unit,
 ) {

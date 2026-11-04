@@ -5,28 +5,18 @@ import java.io.File
 import java.io.RandomAccessFile
 
 /**
- * ReplayGain read straight out of a file's own tags.
- *
- * [MediaMetadataRetriever][android.media.MediaMetadataRetriever] — what
- * [LocalLibrary] reads everything else with — only answers a fixed list of
- * keys, and ReplayGain is not one of them. It is always a *custom* tag: a
- * `REPLAYGAIN_TRACK_GAIN` Vorbis comment in FLAC/Ogg/Opus, a `TXXX` frame in
- * MP3, an iTunes `----` atom in MP4. So the tag has to be read here, which is
- * cheap enough to do in the same pass that reads everything else: each parser
- * walks only the metadata at the front of the file (MP4 excepted, where `moov`
- * may sit at the end and is seeked to properly).
- *
- * The gain lands on [Track.gainDb] at scan time exactly as a server's does, so
- * playback treats a local file no differently from a Navidrome track.
+ * ReplayGain read straight from a file's own tags.
+ * [MediaMetadataRetriever][android.media.MediaMetadataRetriever] has no key
+ * for it; it's always a custom tag: a `REPLAYGAIN_TRACK_GAIN` Vorbis comment
+ * in FLAC/Ogg/Opus, a `TXXX` frame in MP3, an iTunes `----` atom in MP4.
+ * Parsers only walk the metadata at the front of the file (MP4 excepted,
+ * where `moov` can sit at the end).
  */
 object ReplayGainTags {
 
     /**
-     * Track gain in dB, or null when the file carries none.
-     *
-     * Album gain is the fallback, matching what the Subsonic client does with
-     * the two fields a server sends: a record tagged only album-wide still
-     * normalises, just against the album's reference instead of the track's.
+     * Track gain in dB, or null if the file has none.
+     * Falls back to album gain, matching the Subsonic client's behavior.
      */
     fun gainDb(file: File): Float? = runCatching {
         RandomAccessFile(file, "r").use { raf ->
@@ -48,10 +38,8 @@ object ReplayGainTags {
         if (tags.isEmpty()) return null
         tags[TRACK_GAIN]?.let { parseDb(it) }?.let { return it }
         tags[ALBUM_GAIN]?.let { parseDb(it) }?.let { return it }
-        // Opus states gain as R128: a Q7.8 fixed-point dB relative to -23 LUFS,
-        // where ReplayGain's reference is -18 — hence the 5 dB shift, without
-        // which every Opus file would play 5 dB quieter than the same music in
-        // any other container.
+        // Opus states gain as R128: Q7.8 fixed-point dB relative to -23 LUFS,
+        // vs. ReplayGain's -18 LUFS reference, hence the shift.
         tags[R128_TRACK_GAIN]?.trim()?.toIntOrNull()?.let { return sane(it / 256f + R128_TO_RG_DB) }
         tags[R128_ALBUM_GAIN]?.trim()?.toIntOrNull()?.let { return sane(it / 256f + R128_TO_RG_DB) }
         return null
@@ -64,11 +52,9 @@ object ReplayGainTags {
     }
 
     /**
-     * A plausible gain, or nothing.
-     *
-     * A misparse is not a small error here — it is a volume the user did not
-     * ask for — so a value outside what any real measurement produces is
-     * treated as evidence the parse went wrong rather than applied.
+     * A plausible gain value, or null.
+     * A misparse here changes playback volume unexpectedly, so a value
+     * outside any real measurement is rejected rather than applied.
      */
     private fun sane(db: Float): Float? =
         db.takeIf { it.isFinite() && it >= MIN_DB && it <= MAX_DB }
@@ -123,13 +109,10 @@ object ReplayGainTags {
     }
 
     /**
-     * Ogg: reassemble the front pages, then read whichever comment header the
-     * stream carries.
-     *
-     * Only the first pages are needed — the comment header is required to come
-     * second, right after the identification header — and reassembling them
-     * sidesteps the packet that spans a page boundary, which is otherwise the
-     * one case a front-of-file scan gets wrong.
+     * Ogg: reassembles the front pages, then reads whichever comment header
+     * the stream carries. Only the first pages are needed, since the
+     * comment header always follows the identification header. Reassembly
+     * also handles a packet split across a page boundary.
      */
     private fun readOgg(raf: RandomAccessFile): Map<String, String> {
         val payload = oggPayload(raf) ?: return emptyMap()

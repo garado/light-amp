@@ -32,8 +32,8 @@ private val LETTERS: List<Char> = ('A'..'Z').toList() + '#'
 
 /**
  * The bucket a title belongs to: its first letter, or "#" for anything starting
- * with a digit or symbol. Callers must key on the *sort* name (article-stripped)
- * so "The Beatles" indexes under B, matching the list order.
+ * with a digit or symbol. Pass the sort name (article-stripped) so "The
+ * Beatles" indexes under B, matching list order.
  */
 fun indexLetterOf(sortName: String): Char {
     val first = sortName.firstOrNull()?.uppercaseChar() ?: return '#'
@@ -41,12 +41,9 @@ fun indexLetterOf(sortName: String): Char {
 }
 
 /**
- * Vertical A–Z strip for jumping around a long list.
- *
- * Only letters that actually occur are tappable; the rest are dimmed so the strip
- * stays a stable full alphabet rather than jumping around as the list changes.
- * Dragging down the strip scrubs through sections, which is the whole point on a
- * list of hundreds of albums.
+ * Vertical A-Z strip for jumping around a long list. Letters with no matching
+ * row are dimmed but stay in place, so the strip doesn't reflow as the list
+ * changes. Dragging scrubs through sections.
  */
 @Composable
 fun AlphabetIndex(
@@ -60,10 +57,8 @@ fun AlphabetIndex(
     /** Draw the strip Z→A, for a list sorted in descending order. */
     reversed: Boolean = false,
 ) {
-    // The row buckets already match the list's order, so only the strip itself
-    // needs flipping — a descending list still wants a working index, just one
-    // that reads the way the list does. The magnifier stays at the top through
-    // the flip: it means "back to the start", which is up either way.
+    // Only the strip itself is flipped for a descending list; row buckets
+    // already match list order.
     val strip = remember(reversed) { if (reversed) LETTERS.reversed() else LETTERS }
     // First row index per letter, so a tap can jump straight there.
     val firstIndex = remember(letters) {
@@ -79,8 +74,7 @@ fun AlphabetIndex(
     }
 
     Box(modifier = modifier.fillMaxHeight().width(px(INDEX_STRIP_PX))) {
-    // A hairline showing where in the list you actually are: the strip says
-    // where you *can* jump, and without this it never says where you are.
+    // Shows current scroll position; the strip itself only shows jump targets.
     ScrollMarker(target, letters, strip, headerCount)
     Column(
         modifier = Modifier
@@ -89,8 +83,7 @@ fun AlphabetIndex(
             .padding(vertical = px(10))
             .pointerInput(firstIndex) {
                 awaitEachGesture {
-                    // Map the touch's y position onto the strip; works for a tap
-                    // and for a continuous drag without extra state.
+                    // Maps a touch y-position onto the strip.
                     fun letterAt(y: Float): Char {
                         val slot = (y / size.height * strip.size).toInt()
                         return strip[slot.coerceIn(0, strip.lastIndex)]
@@ -128,13 +121,9 @@ fun AlphabetIndex(
 }
 
 /**
- * Where the list has reached, as a line across the strip.
- *
- * Positioned by *letter*, not by how far down the list you are: the two only
- * agree when every letter has the same number of rows, which no library does —
- * a collection heavy in S would show the line against P for hundreds of rows.
- * The line sits within the current letter's own slot, advancing through it as
- * you scroll that letter's rows, so it always points at the letter you're in.
+ * Line across the strip marking scroll position. Positioned by the current
+ * letter, not by fraction scrolled. A library heavy in one letter would
+ * otherwise misalign the marker against the actual rows.
  */
 @Composable
 private fun BoxScope.ScrollMarker(
@@ -149,8 +138,8 @@ private fun BoxScope.ScrollMarker(
     val row = (target.firstVisibleIndex - headerCount).coerceIn(0, letters.lastIndex)
     val slot = strip.indexOf(letters[row])
     if (slot < 0) return
-    // How far through this letter's own rows we are, so the line moves smoothly
-    // rather than jumping a whole slot at each boundary.
+    // Progress through this letter's rows, so the line moves smoothly instead
+    // of jumping a whole slot at each boundary.
     val start = letters.indexOfFirst { it == letters[row] }
     val end = letters.indexOfLast { it == letters[row] }
     val within = if (end > start) (row - start).toFloat() / (end - start + 1) else 0f
@@ -168,13 +157,7 @@ private fun BoxScope.ScrollMarker(
     }
 }
 
-/**
- * Width of the strip, so lists can keep their text clear of it.
- *
- * The letters and the position marker (which spans the lane) centre in it, and
- * the plain scroll bar shares the same lane so it lands on the same axis — see
- * [SCROLLBAR_LANE_PX].
- */
+/** Width of the strip. The plain scroll bar shares this lane; see [SCROLLBAR_LANE_PX]. */
 const val INDEX_STRIP_PX = 66
 private const val MARKER_H_PX = 3
 

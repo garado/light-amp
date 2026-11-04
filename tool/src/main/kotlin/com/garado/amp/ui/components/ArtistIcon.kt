@@ -7,14 +7,9 @@ import androidx.compose.ui.graphics.vector.PathParser
 import androidx.compose.ui.unit.dp
 
 /**
- * Material Symbols "artist" — a figure with a note, which the classic Material
- * Icons set has no equivalent of.
- *
- * Built from Google's own path data rather than drawn by hand: Symbols are a
- * different artifact from the `material-icons-extended` the rest of the app
- * pulls from, and adding that dependency for one glyph would pull thousands.
- * The source viewBox is 0 -960 960 960 (Symbols' own y-up coordinates), so the
- * vector declares those bounds and the path is used unchanged.
+ * Material Symbols "artist" icon. Built from Google's path data instead of
+ * added as a dependency, since `material-icons-extended` doesn't include it.
+ * Uses Symbols' native viewBox (0 -960 960 960).
  */
 val ArtistSymbol: ImageVector by lazy {
     ImageVector.Builder(
@@ -31,10 +26,7 @@ val ArtistSymbol: ImageVector by lazy {
     }.build()
 }
 
-/**
- * Shifted down by 960 from the published path, which is authored in Symbols'
- * y-up space; Compose's viewport starts at 0.
- */
+/** Path coordinates shifted down by 960 to convert from Symbols' y-up space to Compose's viewport. */
 private const val ARTIST_PATH =
     "M740 400h140v80h-80v220q0 42-29 71t-71 29q-42 0-71-29t-29-71q0-42 29-71t71-29q8 0 18 " +
         "1.5t22 6.5v-208ZM120 800v-112q0-35 17.5-63t46.5-43q62-31 126-46.5T440 520q42 0 " +

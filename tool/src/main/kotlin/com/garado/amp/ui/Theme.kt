@@ -17,7 +17,7 @@ import com.thelightphone.sdk.ui.LightThemeTokens
 /**
  * Wraps a screen in the Light theme, choosing the monochrome scheme from the
  * persisted "invert colors" preference, fills the background, and provides the
- * [Scale] every size on the screen is drawn at — see [LocalScale].
+ * [Scale] every size on the screen is drawn at. See [LocalScale].
  */
 @Composable
 fun PlayerTheme(content: @Composable () -> Unit) {
@@ -26,7 +26,7 @@ fun PlayerTheme(content: @Composable () -> Unit) {
     LightTheme(colors = colors) {
         val scale = rememberScale()
         // The one place every screen passes through tells the artwork loader
-        // how wide the panel really is — see ArtworkLoader.panelWidthPx.
+        // how wide the panel really is. See ArtworkLoader.panelWidthPx.
         SideEffect { App.artwork.panelWidthPx = scale.windowWidthPx }
         CompositionLocalProvider(LocalScale provides scale) {
             Box(

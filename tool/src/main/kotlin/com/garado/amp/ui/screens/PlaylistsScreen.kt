@@ -61,11 +61,10 @@ class PlaylistDetailScreen(
     private val playlistName: String,
 ) : SimpleLightScreen<Unit>(sealed) {
 
-    // Held on the screen instance so local edits (remove / reorder) survive the
-    // push/pop of the track-options sheet without a fresh server round-trip.
+    // Held on the screen instance so edits survive push/pop of the track-options sheet.
     private val tracks = mutableStateOf<List<Track>?>(null)
 
-    // While casting, the rocker belongs to the speaker — see handleVolumeKey.
+    // While casting, the rocker belongs to the speaker, see handleVolumeKey.
     override fun onKeyDown(keyCode: Int, event: KeyEvent): Boolean =
         App.playback.handleVolumeKey(keyCode) || super.onKeyDown(keyCode, event)
 
@@ -79,9 +78,8 @@ class PlaylistDetailScreen(
 
         val selection = rememberSelection("playlist:$playlistId")
 
-        // The stored name, not the one this screen was opened with: the corner
-        // menu can rename the playlist while this page is under it, and the
-        // constructor's copy would keep saying the old name until reopened.
+        // Read from the store, not the constructor arg, since the corner menu can rename
+        // the playlist while this screen is open.
         val liveName = App.library.playlists.collectAsState().value
             .firstOrNull { it.id == playlistId }?.name ?: playlistName
 
@@ -91,9 +89,7 @@ class PlaylistDetailScreen(
                     selection = selection,
                     onDelete = {
                         removeSongs(selection.selected)
-                        // Stay in edit mode with an empty selection: pruning a
-                        // playlist is usually more than one pass, and the X is
-                        // right there when it isn't.
+                        // Stay in edit mode with an empty selection after deleting.
                         selection.begin()
                     },
                     onConfirm = {
@@ -107,11 +103,8 @@ class PlaylistDetailScreen(
                 AppHeader(
                     onBack = { goBack() },
                     title = liveName,
-                    // The playlist's own menu, not the library's sort: a
-                    // playlist plays in its own order, so the corner that
-                    // offered a dead sort now offers its verbs — play, rename,
-                    // delete. Same menu as a long-press on its row; see the
-                    // album page, which made the same trade.
+                    // Corner menu opens playlist actions (play/rename/delete), not a sort.
+                    // A playlist always plays in its own order.
                     rightAction = HeaderAction(
                         AppIcons.MoreHoriz,
                         onLongClick = { go { SettingsScreen(it) } },
@@ -128,12 +121,6 @@ class PlaylistDetailScreen(
         }
     }
 
-    /**
-     * Edit mode is one mode, not two: the grab bars appear and rows become
-     * selectable together. Both are things you do to the playlist rather than
-     * with it, and splitting them would mean two toggles competing for the same
-     * corner of a header that has no spare room.
-     */
     @Composable
     private fun TrackList(list: List<Track>, selection: SelectionState) {
         val editing = selection.active
@@ -153,7 +140,6 @@ class PlaylistDetailScreen(
                         go { NowPlayingScreen(it) }
                     }
                 }
-                // Same glyph as the handles it reveals, so the row says what it does.
                 item { PlayAllRow(AppIcons.Dehaze, "Edit") { selection.begin() } }
             }
             itemsIndexed(list, key = { i, t -> "$i-${t.id}" }) { index, track ->
@@ -209,7 +195,6 @@ class PlaylistDetailScreen(
                         AppText(track.title, pxSp(ROW_TITLE_PX), lineHeight = pxSp(ROW_TITLE_LINE_PX), maxLines = 1)
                         AppText(track.artist, pxSp(ROW_SUB_PX), lineHeight = pxSp(ROW_SUB_LINE_PX), dim = true, maxLines = 1)
                     }
-                    // Drag the handle to reorder the song within the playlist.
                     if (editing) AppIcon(
                         AppIcons.Dehaze,
                         size = px(51),
@@ -256,11 +241,7 @@ class PlaylistDetailScreen(
         }
     }
 
-    /**
-     * Remove several at once by rewriting the playlist with the survivors: the
-     * per-index endpoint would shift every index behind each removal, and one
-     * request can't half-apply.
-     */
+    /** Rewrites the playlist with survivors instead of per-index removal, which can't be batched. */
     private fun removeSongs(ids: Set<String>) {
         val current = tracks.value ?: return
         if (ids.isEmpty()) return

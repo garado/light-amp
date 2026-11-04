@@ -25,12 +25,10 @@ import com.garado.amp.ui.px
 import com.thelightphone.sdk.ui.LightThemeTokens
 
 /**
- * The thin bar down the right edge of a Light list.
- *
- * Position and length come from the rows the layout actually reports, so it
- * stays honest on a list whose rows aren't all the same height, and it is drawn
- * only when there is something to scroll — on a short list it would be a full-
- * height line that never moves, which reads as a border.
+ * The thin bar down the right edge of a Light list. Position and length come
+ * from the layout's reported rows, so it stays correct when rows aren't all
+ * the same height. Hidden when there's nothing to scroll, to avoid drawing a
+ * full-height line that never moves.
  */
 @Composable
 fun BoxScope.ListScrollBar(state: LazyListState) = ListScrollBar(rememberScrollTarget(state))
@@ -46,26 +44,19 @@ fun BoxScope.ListScrollBar(target: ScrollTarget, lane: Dp = px(SCROLLBAR_LANE_PX
     val travel = (first / (1f - fraction).coerceAtLeast(0.0001f)).coerceIn(0f, 1f)
 
     val scope = rememberCoroutineScope()
-    // The gesture reads the *current* target, not the one it was built with: a
-    // ScrollTarget is rebuilt on every scroll, so keying the pointer input on it
-    // would tear the detector down and cancel the drag the moment it moved the
-    // list — which is to say, immediately.
+    // The gesture must read the current target, not the one it was built with.
+    // ScrollTarget is rebuilt on every scroll, so keying pointerInput on it
+    // would tear down the gesture detector and cancel the drag immediately.
     val latest by rememberUpdatedState(target)
 
-    // Measures the space it's in rather than being told: every list that wants a
-    // bar is a different height, and passing that height around was one more
-    // number to keep in step with the layout.
     BoxWithConstraints(
         modifier = Modifier
             .align(Alignment.TopEnd)
             .fillMaxHeight()
             .width(lane)
             .pointerInput(Unit) {
-                // Where in the list a touch at this height points. The thumb's
-                // own length is taken off the travel and half of it off the
-                // touch, so the bar centres on your finger rather than starting
-                // there — otherwise the list jumps down by a thumb's worth the
-                // instant you grab it.
+                // Centers the thumb on the touch point rather than starting the
+                // thumb's top edge there, so grabbing it doesn't jump the list.
                 fun indexAt(y: Float): Int {
                     val now = latest
                     if (now.totalItems == 0) return 0
@@ -92,9 +83,7 @@ fun BoxScope.ListScrollBar(target: ScrollTarget, lane: Dp = px(SCROLLBAR_LANE_PX
             },
         contentAlignment = Alignment.TopCenter,
     ) {
-        // The same shape the LP3 draws elsewhere — a hairline for the whole
-        // travel, with a thicker bar over the part you can see — so a list's
-        // scrollbar reads like the rest of the system's.
+        // Hairline track for the full travel, thicker bar over the visible part.
         Box(
             modifier = Modifier
                 .fillMaxHeight()
@@ -113,12 +102,8 @@ fun BoxScope.ListScrollBar(target: ScrollTarget, lane: Dp = px(SCROLLBAR_LANE_PX
 }
 
 /**
- * The lane the bar lives in — lists inset their content by this much.
- *
- * The same width as the A–Z strip on purpose: both are centred in their lane, so
- * matching lanes put the bar and the letters on one axis. A list that swaps one
- * for the other (All Albums for Liked Albums, say) then doesn't appear to shift
- * its furniture sideways.
+ * The lane the bar lives in; lists inset their content by this much. Matches
+ * the A-Z strip's width so swapping one for the other doesn't shift the lane.
  */
 const val SCROLLBAR_LANE_PX = INDEX_STRIP_PX
 

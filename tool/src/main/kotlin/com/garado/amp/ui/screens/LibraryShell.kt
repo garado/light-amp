@@ -89,9 +89,8 @@ import com.garado.amp.ui.components.SectionLabel
 import com.garado.amp.ui.components.TextRow
 
 /**
- * Height of the app's bottom bars in LP3 physical pixels — the same 4 grid units
- * (160px) the stock LightOS bottom bar uses. Shared by the library tab bar and
- * the Now Playing transport so both sit on the same baseline.
+ * Height of the app's bottom bars in LP3 physical pixels, the same 4 grid
+ * units (160px) the stock LightOS bottom bar uses.
  */
 const val BOTTOM_BAR_PX = 160
 
@@ -116,18 +115,13 @@ class ShellActions(
     val nowPlaying: () -> Unit,
     val settings: () -> Unit,
     val search: () -> Unit,
-    /** The SDK's full-screen editor — Simplified's way of typing a query. */
+    /** The SDK's full-screen editor. Simplified's way of typing a query. */
     val editSearch: (String) -> Unit,
-    /** Opens the full-screen LP3 keyboard to edit the search query. */
-    /** More carries the showing page's modifiers up with it — see [LibraryPage]. */
+    /** Carries the showing page's modifiers up with it. See [LibraryPage]. */
     val more: (LibraryPage) -> Unit,
-    /** Simplified's centre button: the library index — see [LibraryNav]. */
+    /** Simplified's centre button: the library index. See [LibraryNav]. */
     val browse: () -> Unit,
-    /**
-     * Each takes the page back should land on — a tab list is the parent of what
-     * it opens, while a search result is a jump and names the hierarchy it
-     * belongs to instead of stacking on top of the results. See [Parent].
-     */
+    /** Each takes the page to land on when going back. See [Parent]. */
     val openAlbum: (String, Parent) -> Unit,
     val openArtist: (String, Parent) -> Unit,
     val openPlaylist: (String, String) -> Unit,
@@ -136,7 +130,7 @@ class ShellActions(
     /** Opens the bulk-action sheet for a multi-selection. */
     val selectionActions: (List<Track>, SelectionState) -> Unit,
     val albumOptions: (String) -> Unit,
-    /** Long-press on an artist: the only way to like one. */
+    /** Long-press on an artist. The only way to like one. */
     val artistOptions: (String) -> Unit,
     val playlistOptions: (String, String) -> Unit,
 )
@@ -145,7 +139,7 @@ class ShellActions(
 fun LibraryShell(
     currentTab: LibraryTab,
     onSelectTab: (LibraryTab) -> Unit,
-    /** Simplified's library index — see [LibraryNav.libraryIndex]. */
+    /** Simplified's library index. See [LibraryNav.libraryIndex]. */
     libraryIndex: Boolean,
     searchActive: Boolean,
     searchQuery: String,
@@ -170,15 +164,11 @@ fun LibraryShell(
                     TabContent(currentTab, actions)
                 }
             }
-            // The keyboard takes the bottom of the screen while typing, and the
-            // bar underneath it would be both unreachable and a second row of
-            // controls under the one in use. Return brings it back.
+            // Hidden while the keyboard is up; it would sit unreachable under it.
             if (!LibraryNav.typing.collectAsState().value) {
             Navbar(
-                // Search keeps the tab it was started from lit. It is not a
-                // destination of its own — it borrows the list in front of you
-                // and hands it back on the way out, so unlighting the tab would
-                // say you had left somewhere you never left.
+                // Search is not its own destination, so it keeps the tab it
+                // was started from lit.
                 current = if (libraryIndex) null else currentTab,
                 onSelect = onSelectTab,
                 onMore = {
@@ -194,19 +184,7 @@ fun LibraryShell(
     }
 }
 
-/**
- * Search results, with the query edited on the LP3 keyboard.
- *
- * The SDK's [com.thelightphone.sdk.ui.LightTextInputEditor] is full-screen by
- * design — it hosts the keyboard itself — so the header shows the current query
- * and tapping it reopens the editor, rather than being an inline field driving
- * the system IME.
- */
-/**
- * One of the four tab lists, with or without the header it normally carries.
- *
- * Search borrows the body without the header — see [SearchView].
- */
+/** One of the four tab lists, with or without its header. Search borrows the body without the header; see [SearchView]. */
 @Composable
 private fun TabContent(tab: LibraryTab, actions: ShellActions, header: Boolean = true) {
     when (tab) {
@@ -222,14 +200,12 @@ private fun SearchView(
     query: String,
     onQueryChange: (String) -> Unit,
     onClose: () -> Unit,
-    /** The list search was started from — what it shows until something is typed. */
+    /** The list search was started from. Shown until something is typed. */
     tab: LibraryTab,
     actions: ShellActions,
 ) {
     val typing by LibraryNav.typing.collectAsState()
-    // While the keyboard is up the field is the query: the keyboard writes into
-    // this state and the results below follow it keystroke by keystroke, rather
-    // than waiting for a submitted string to come back from another screen.
+    // While the keyboard is up, results follow this field keystroke by keystroke.
     val state = rememberTextFieldState(query)
     val live = if (typing) state.text.toString() else query
     LaunchedEffect(live, typing) { if (typing) onQueryChange(live) }
@@ -238,19 +214,15 @@ private fun SearchView(
     val results = remember(live, library.size) { App.library.search(live) }
     val listState = rememberListAnchor("search")
 
-    // The rows take the scrollbar's lane back individually, so the list itself
-    // keeps equal margins.
+    // Each row takes back the scrollbar's lane individually, so the list keeps
+    // equal margins.
     val lane = px(SCROLLBAR_LANE_PX) - px(LIST_EDGE_PX)
     Column(Modifier.fillMaxSize()) {
-        // One header in both states. Return only puts the keyboard away — the
-        // query stays where it was typed, with the results scrolling under it,
-        // so committing a search doesn't move the thing you just wrote.
         SearchHeader(
             query = live,
             onEdit = {
-                // Simplified never raises the inline keyboard: its search is the
-                // SDK's own screen, and the two would be different ways of
-                // typing the same query on the same phone.
+                // Simplified's search is the SDK's own full-screen editor, never
+                // the inline keyboard.
                 if (App.layoutMode.value == LayoutMode.SIMPLIFIED) {
                     actions.editSearch(live)
                 } else {
@@ -258,11 +230,8 @@ private fun SearchView(
                 }
             },
             onCancel = {
-                // The cross abandons the search rather than just the keyboard:
-                // back to the list it was started from, as if it never happened.
-                // Including the query — an abandoned search that turned up again
-                // half-typed the next time would be the app remembering the one
-                // thing you just said you were finished with.
+                // Abandons the search entirely, including the typed query, not
+                // just the keyboard.
                 state.clearText()
                 onQueryChange("")
                 LibraryNav.typing.value = false
@@ -271,10 +240,6 @@ private fun SearchView(
             onMenu = { actions.more(LibraryPage.SEARCH) },
         )
         Box(modifier = Modifier.weight(1f)) {
-        // Nothing typed yet, so nothing to show but what was already there. The
-        // keyboard opening is not itself a search: emptying the screen the
-        // moment it appears would throw away the list you were looking at to
-        // make room for no answer at all.
         if (live.isBlank()) {
             TabContent(tab, actions, header = false)
         } else {
@@ -289,9 +254,6 @@ private fun SearchView(
             if (results.artists.isNotEmpty()) {
                 item { SectionLabel("Artists") }
                 items(results.artists, key = { "ar-${it.name}" }) { artist ->
-                    // A list row like the albums and songs under it, not a menu
-                    // row: a result is a thing in the library, and the menus'
-                    // larger line between two list rows read as a heading.
                     ArtistRow(
                         name = artist.name,
                         subtitle = "",
@@ -327,14 +289,8 @@ private fun SearchView(
                         coverArtId = track.coverArtId,
                         modifier = Modifier.padding(end = lane),
                         onClick = {
-                            // Search stays up underneath, unlike the two
-                            // branches above: an artist or an album is a place,
-                            // and going to one lays its tab down as the parent,
-                            // so the results have nowhere left to sit. Playing a
-                            // track pushes the player straight onto this page —
-                            // and back out of the player means back to the
-                            // results you picked from, still typed, still
-                            // scrolled where you left them.
+                            // Pushes the player on top; search stays underneath, so
+                            // backing out returns to the results, still typed.
                             if (App.playback.currentTrack.value?.id != track.id) {
                                 App.playback.playQueue(listOf(track), 0)
                             }
@@ -355,16 +311,9 @@ private fun SearchView(
 /**
  * The search page's header: the query, and a way out.
  *
- * The same header whether or not the keyboard is up. Return commits the search
- * and puts the keyboard away, but the field stays exactly where it was and the
- * results scroll underneath it — a query that jumped somewhere else the moment
- * you finished typing it would be the app moving the thing you were looking at.
- *
- * Laid out on the same axes as everything else on the page: the magnifier sits
- * where the lists' own field puts it (the list's edge inset plus a row's lead,
- * which is where every cover and glyph below starts). The cross takes the full
- * 160px corner every other page gives its menu, so the button under your thumb
- * is in the same place here as everywhere else.
+ * Same header whether or not the keyboard is up; the field doesn't move when
+ * the keyboard closes. The cross takes the full 160px corner every other page
+ * gives its menu.
  */
 @Composable
 private fun SearchHeader(
@@ -391,9 +340,6 @@ private fun SearchHeader(
             Spacer(Modifier.width(px(ROW_GAP_PX)))
             Box(modifier = Modifier.weight(1f)) {
                 AppText(
-                    // The placeholder is the same word the field carries on the
-                    // lists, so starting to type reads as continuing, not as
-                    // arriving somewhere new.
                     text = query.ifEmpty { "Search" },
                     size = pxSp(SEARCH_TEXT_PX),
                     lineHeight = pxSp(ROW_TITLE_LINE_PX),
@@ -401,10 +347,7 @@ private fun SearchHeader(
                 )
             }
         }
-        // The cross takes the slot the magnifier had on the tab this came from,
-        // so the button that leaves search is where the button that entered it
-        // was — and the page's own menu keeps the corner it has everywhere else.
-        // Both slots are AppHeader's: an 80px square hard against the 160px one.
+        // The cross sits in the slot the magnifier used on the tab search came from.
         Box(
             modifier = Modifier
                 .width(px(SEARCH_SLOT_PX))
@@ -431,58 +374,26 @@ private const val SEARCH_SLOT_PX = 80
 /** Where the search glyph sits, on the axis the list's own field uses. */
 private const val SEARCH_AXIS_PX = LIST_EDGE_PX + ROW_LEAD_PX
 
-/**
- * The query, drawn the way the LP3's own keyboard screen draws it: a line of
- * text with a rule beneath, the width of the page.
- *
- * Tapping it reopens that keyboard rather than focusing an inline field — the
- * SDK's editor is full-screen by design, so the query is shown here and edited
- * there, and making the two look alike is what says they are the same field.
- *
- * Clearing sits at the right end, where a text field conventionally keeps it,
- * and appears only with something to clear. Emptying stays on this page:
- * leaving search is what the bar is for, and clearing used to do both, which
- * meant you could never start a new search from an old one.
- */
-/**
- * The search header's type and glyph, in the same px units the rows use — so
- * they read against ROW_TITLE_PX (54) and its neighbours rather than against a
- * scale of their own, and the header matches the rows beneath it.
- */
+/** The search header's type and glyph, sized against ROW_TITLE_PX so they match the rows beneath. */
 private val SEARCH_TEXT_PX: Int @Composable get() = ROW_TITLE_PX
 private const val SEARCH_GLYPH_PX = ROW_ACTION_ICON_PX
 
 
 
 /**
- * The header every tab shares: sort at the left corner, search and now-playing at
- * the right, and — when the setting puts it there — the liked/all switch in the
- * mirror of the search slot.
+ * The header every tab shares: sort at the left corner, search and now-playing
+ * at the right, plus the liked/all switch when the setting enables it.
  */
 @Composable
 private fun TabHeader(tab: LibraryTab, actions: ShellActions) {
-    // Now-playing at the left corner and More at the right, where it reads as
-    // this page's own menu rather than a fifth tab. Nothing is folded into the
-    // title: it used to open the sort menu, which was a gesture with nothing to
-    // announce it and one of three different ways into the three things that
-    // are now rows on More. The title names the page and no more than that.
-    //
-    // Except under Simplified, where the bar holds the player itself: a second
-    // way to the same page, one above the other, is one too many — and the
-    // corner it vacates becomes the way back to the library index this tab was
-    // opened from.
+    // Under Simplified the bar already holds the player, so this corner becomes
+    // the way back to the library index this tab was opened from instead.
     val simplified = App.layoutMode.collectAsState().value == LayoutMode.SIMPLIFIED
     AppHeader(
         title = tabTitle(tab, likedOnly(tab), tagFilter(tab)),
         onBack = if (simplified) ({ LibraryNav.openLibraryIndex() }) else null,
-        // Expanded only: Simplified keeps search in the bar, and a second way to
-        // it directly above that one is the same control twice.
-        //
-        // In the inner slot beside the page's menu rather than in a corner of
-        // its own, because that is what search is here — a way of narrowing the
-        // list in front of you, sat next to the sort and the filters that do the
-        // same thing by other means. Straight to the keyboard: a magnifier is a
-        // request to type rather than a page to go and look at.
+        // Expanded only; Simplified already has search in the bar. Opens the
+        // keyboard directly, not a search page.
         searchAction = if (simplified) {
             null
         } else {
@@ -503,10 +414,8 @@ val LibraryTab.page: LibraryPage
     }
 
 /**
- * The genre and composer a tab has been narrowed to — see [TagFilterScreen].
- *
- * Only the two lists of things a tag describes have one: an artist is not a
- * genre's or a composer's, and a playlist is whatever was put in it.
+ * The genre and composer a tab has been narrowed to. See [TagFilterScreen].
+ * Only Albums and Songs have one; artists and playlists aren't tagged.
  */
 @Composable
 fun tagFilter(tab: LibraryTab): TagFilter = when (tab) {
@@ -526,17 +435,11 @@ fun likedOnly(tab: LibraryTab): Boolean = when (tab) {
 }
 
 /**
- * What the tab is called, given the narrowing over it.
- *
- * The title is the only thing on the page that says a list has been narrowed —
- * without it a filtered library just looks like one that lost most of its
- * records.
+ * What the tab is called, given the narrowing over it. The title is the only
+ * thing on the page that shows a list has been narrowed.
  */
 fun tabTitle(tab: LibraryTab, likedOnly: Boolean, filter: TagFilter = TagFilter()): String {
     val base = if (likedOnly) "Liked " + tab.title else tab.title
-    // The genre and composer too, for the same reason as "Liked": a list
-    // narrowed to a tag looked exactly like a library that had lost most of
-    // its records, and the only way to learn otherwise was to open More.
     val tags = listOf(filter.genre, filter.composer).filter { it.isNotEmpty() }
     return if (tags.isEmpty()) base else (listOf(base) + tags).joinToString(" · ")
 }
@@ -552,28 +455,16 @@ private fun rememberLocalAccess(): Boolean {
     return readable
 }
 
-/**
- * The one row a local library shows when it hasn't been let in yet.
- *
- * Without it the tab is simply empty, which reads as "this phone has no music"
- * rather than "this app hasn't been allowed to look".
- */
+/** The one row a local library shows when it hasn't been granted access yet. */
 private fun LazyListScope.localAccessNotice(needed: Boolean, onAsk: () -> Unit) {
     if (!needed) return
     item { PlayAllRow(AppIcons.Smartphone, "Allow Music Access", onClick = onAsk) }
 }
 
 /**
- * Why the last sync gave up, at the top of the list it left behind.
- *
- * Without it the only sign is a list that is shorter than it should be, or
- * empty — and the message lived on the source's own page under Settings, which
- * is the last place anyone looks when the library is the thing that seems
- * broken. A refused login in particular now leaves the cached rows in place, so
- * this may sit above a library that looks perfectly fine and is simply no
- * longer being updated.
- *
- * Tapping goes to Settings, which is the way to the source that needs fixing.
+ * Why the last sync failed, shown at the top of the list it left behind.
+ * A refused login leaves cached rows in place, so this can sit above a library
+ * that looks fine but has stopped updating. Tapping opens Settings.
  */
 private fun LazyListScope.syncErrorNotice(error: String?, onOpen: () -> Unit) {
     if (error.isNullOrBlank()) return
@@ -587,12 +478,8 @@ private fun AlbumsTab(actions: ShellActions, header: Boolean = true) {
     val letters = view.letters
     val reversed by App.settings.albumSortReversed.collectAsState(initial = false)
     val downloadedAlbums by App.library.downloadedAlbumIds.collectAsState()
-    // Offered only when the list it leads to has something in it: a switch to an
-    // empty page is a dead end dressed as a destination.
-    // Both read unconditionally: behind && the second collectAsState is a
-    // conditional composable call, and the state it subscribes to stops
-    // triggering recomposition — which is why the albums tab kept its switch
-    // hidden long after the liked albums had loaded.
+    // Read unconditionally. Putting the second collectAsState behind && makes
+    // it a conditional composable call, which stops recomposing on that state.
     val supportsLikes = App.source.collectAsState().value.supportsLikes
     val needsAccess = !rememberLocalAccess()
     val syncError = App.library.syncState.collectAsState().value.error
@@ -601,10 +488,7 @@ private fun AlbumsTab(actions: ShellActions, header: Boolean = true) {
     Column(Modifier.fillMaxSize()) {
         if (header) TabHeader(LibraryTab.ALBUMS, actions)
         if (grid) {
-            // Its own anchor, separate from the list's: see rememberGridAnchor.
             val gridState = rememberGridAnchor("tab:albums/grid", headerCount = 1)
-            // No strip and no bar at either width: the covers take the whole
-            // screen, which is the reason to be in a grid at all.
             Box(modifier = Modifier.weight(1f)) {
                 AlbumGrid(
                     albums = sorted,
@@ -620,12 +504,9 @@ private fun AlbumsTab(actions: ShellActions, header: Boolean = true) {
         } else {
             IndexedList(
                 anchor = "tab:albums",
-                // The index only makes sense while the list is in name order.
                 letters = letters,
-                // The action row, so the A–Z strip still lands on the right
-                // album — see IndexedList.headerCount. Counted whether or not
-                // the page has its own header: search borrows the list, and the
-                // list keeps the row that belongs to it.
+                // Counts the action row so the A-Z strip still lands correctly.
+                // See IndexedList.headerCount.
                 headerCount = 1,
                 reversed = reversed,
             ) {
@@ -660,11 +541,9 @@ private fun RandomAlbumRow(albums: List<Album>, actions: ShellActions) {
     PlayAllRow(LightIcons.SHUFFLE, "Play Random Album") {
         val album = albums.randomOrNull() ?: return@PlayAllRow
         App.scope.launch {
-            // Reading the album's tracks is a database call and belongs off the
-            // main thread; handing them to the player is not. ExoPlayer's looper
-            // *is* Main and it enforces that — see PlaybackController, where
-            // every other caller happens to arrive from a composable and so is
-            // already on it.
+            // Reading tracks is a database call, off the main thread. Handing
+            // them to the player must be on it; ExoPlayer's looper is Main and
+            // enforces that. See PlaybackController.
             val queue = App.library.albumQueue(listOf(album.id))
             if (queue.isEmpty()) return@launch
             withContext(Dispatchers.Main) {
@@ -676,12 +555,10 @@ private fun RandomAlbumRow(albums: List<Album>, actions: ShellActions) {
 }
 
 /**
- * A tab list with the A–Z jump strip down its right edge.
+ * A tab list with the A-Z jump strip down its right edge.
  *
- * [letters] is the bucket for each row (empty to hide the strip — it's meaningless
- * when the list isn't alphabetical). [headerCount] is how many rows sit above the
- * indexed content so a jump lands on the right item, and [anchor] names the list
- * so it can come back to where it was after a visit to another screen.
+ * [letters] is empty to hide the strip. [headerCount] is the row count above
+ * the indexed content, so a jump lands on the right item.
  */
 @Composable
 private fun ColumnScope.IndexedList(
@@ -698,8 +575,7 @@ private fun ColumnScope.IndexedList(
         LazyColumn(
             state = listState,
             modifier = Modifier.fillMaxSize(),
-            // Keeps titles clear of whichever bar is down the right edge; without
-            // it a long album name ran underneath the letters.
+            // Keeps titles clear of whichever bar is down the right edge.
             contentPadding = listPadding(
                 end = px(if (indexed) INDEX_STRIP_PX else SCROLLBAR_LANE_PX),
             ),
@@ -729,10 +605,8 @@ private fun SongsTab(actions: ShellActions, header: Boolean = true) {
     val reversed by App.settings.songSortReversed.collectAsState(initial = false)
     val downloadedIds by App.library.downloadedTrackIds.collectAsState()
     val selection = rememberSelection("songs")
-    // Both read unconditionally: behind && the second collectAsState is a
-    // conditional composable call, and the state it subscribes to stops
-    // triggering recomposition — which is why the albums tab kept its switch
-    // hidden long after the liked tracks had loaded.
+    // Read unconditionally. Putting the second collectAsState behind && makes
+    // it a conditional composable call, which stops recomposing on that state.
     val supportsLikes = App.source.collectAsState().value.supportsLikes
     val needsAccess = !rememberLocalAccess()
     val syncError = App.library.syncState.collectAsState().value.error
@@ -797,16 +671,12 @@ private fun ArtistsTab(actions: ShellActions, header: Boolean = true) {
     val sorted = view.items
     val letters = view.letters
     val reversed by App.settings.artistSortReversed.collectAsState(initial = false)
-    // Both read unconditionally: behind && the second collectAsState is a
-    // conditional composable call, and the state it subscribes to stops
-    // triggering recomposition — which is why the albums tab kept its switch
-    // hidden long after the liked artists had loaded.
+    // Read unconditionally. Putting the second collectAsState behind && makes
+    // it a conditional composable call, which stops recomposing on that state.
     val supportsLikes = App.source.collectAsState().value.supportsLikes
     val downloadedArtists by App.library.downloadedArtistNames.collectAsState()
-    // One request for the server's own artist records, which is where their
-    // pictures are — the library's artists come from track tags and have none.
-    // Skipped entirely when the pictures are switched off — there is no point
-    // fetching a page of artist records for images nothing is going to draw.
+    // Track-tag artists have no images. Primed from the server's artist records
+    // instead, skipped entirely when images are switched off.
     val artistImages = !App.hideArtistImages.collectAsState().value
     LaunchedEffect(artistImages) { if (artistImages) App.library.primeArtistImages() }
     val needsAccess = !rememberLocalAccess()
@@ -843,15 +713,12 @@ private fun PlaylistsTab(actions: ShellActions, header: Boolean = true) {
     val starred by App.starredPlaylists.collectAsState()
     val reversed by App.settings.playlistSortReversed.collectAsState(initial = false)
     val downloadedPlaylists by App.library.downloadedPlaylistIds.collectAsState()
-    // getPlaylists only returns metadata, not membership — so the badge above
-    // has nothing to go on until each playlist's tracks are fetched once here.
+    // getPlaylists returns metadata only, not membership; fetch tracks once here.
     LaunchedEffect(playlists) {
         App.library.primePlaylistTrackIds(playlists.map { it.id })
     }
     val source = App.source.collectAsState().value
-    // Keyed on the source, not on first composition: playlists are dropped when
-    // the source changes, and without a fetch tied to that change a shell that
-    // stayed composed through the switch would sit on an empty list for ever.
+    // Keyed on the source so switching sources refreshes the list.
     LaunchedEffect(source.id) { App.library.refreshPlaylists() }
 
     val starredList = remember(playlists, starred) { playlists.filter { it.id in starred } }
@@ -859,10 +726,7 @@ private fun PlaylistsTab(actions: ShellActions, header: Boolean = true) {
         playlists.filter { folderOf[it.id] != null }.groupBy { folderOf[it.id]!! }
     }
     val folderNames = remember(byFolder) { byFolder.keys.sorted() }
-    // Starred-and-ungrouped playlists show once, pinned at the top — not again
-    // down here. A folder's starred member still shows twice, but that's across
-    // two different screens (the pin, and the folder itself) rather than one
-    // list repeating a row it just showed.
+    // Starred-and-ungrouped playlists are pinned at the top, so excluded here.
     val ungrouped = remember(playlists, folderOf, starred) {
         playlists.filter { folderOf[it.id] == null && it.id !in starred }
     }
@@ -915,37 +779,26 @@ private fun PlaylistRow(
 
 
 /**
- * Everything there is to browse, in one list.
- *
- * The simplified layout's middle button lands here. It holds the four tabs the
- * standard bar spreads along the bottom, plus the tag lists that would
- * otherwise only be reachable through More — this page is the library, so a way
- * of looking at the library belongs on it.
- *
- * Each entry leads somewhere and nothing here is a setting, so the header keeps
- * no corner actions: the player and search are in the bar below, an arm's reach
- * from anywhere.
+ * Everything there is to browse, in one list. Simplified's middle button lands
+ * here: the four tabs plus the tag lists otherwise reachable only through More.
  */
 @Composable
 private fun LibraryIndex(currentTab: LibraryTab, actions: ShellActions) {
     val source by App.source.collectAsState()
-    // Which row is where you already are, so the index reads as a map rather
-    // than a plain menu — see IndexRow.
     val currentLikedOnly = likedOnly(currentTab)
 
-    // A Column of its own: the shell hands each page a Box, so a header and a
-    // list dropped into it straight would be drawn one on top of the other.
+    // Own Column: the shell hands each page a Box, which would stack a header
+    // and list on top of each other.
     Column(modifier = Modifier.fillMaxSize()) {
     AppHeader(
         title = "Library",
         fitTitle = true,
-        // The page's own menu, as on every other library page.
         rightAction = HeaderAction(AppIcons.Sort, onLongClick = actions.settings) {
             actions.more(LibraryPage.LIBRARY)
         },
     )
     ScrollableList(modifier = Modifier.fillMaxSize()) {
-        // A source with no server has nowhere to keep a playlist — see
+        // A source with no server has nowhere to keep a playlist. See
         // MusicSource.supportsPlaylists.
         if (source.supportsPlaylists) {
             item { IndexRow(LibraryTab.PLAYLISTS, current = currentTab == LibraryTab.PLAYLISTS) }
@@ -964,8 +817,7 @@ private fun IndexRow(tab: LibraryTab, current: Boolean) {
         title = tab.title,
         underline = current,
         onClick = {
-            // The unnarrowed list: an entry named "Albums" that showed only the
-            // liked ones because the filter was left on would be lying.
+            // Clears the liked filter so the tab matches its unqualified name.
             App.scope.launch { setLikedOnly(tab, false) }
             LibraryNav.selectTab(tab)
         },
@@ -983,9 +835,7 @@ suspend fun setLikedOnly(tab: LibraryTab, value: Boolean) {
 
 /**
  * The bottom bar, in whichever shape the Layout setting asks for.
- *
- * Both shapes take the same handlers and each uses what it needs, so a caller
- * doesn't have to know which one is showing — see [AppSettings.layoutMode].
+ * See [AppSettings.layoutMode].
  */
 @Composable
 fun Navbar(
@@ -993,7 +843,7 @@ fun Navbar(
     onSelect: (LibraryTab) -> Unit,
     onMore: () -> Unit,
     moreActive: Boolean = false,
-    /** Opens library search — the bar's fifth destination in the classic layout. */
+    /** Opens library search. The bar's fifth destination in the classic layout. */
     onSearch: (() -> Unit)? = null,
     searchActive: Boolean = false,
     /** Simplified keeps the player in the bar rather than the header's corner. */
@@ -1001,8 +851,7 @@ fun Navbar(
     /** Simplified's centre tile: which library you are looking at. */
     onBrowse: (() -> Unit)? = null,
 ) {
-    // Read from the eager state rather than the preference Flow: the bar is on
-    // every screen, and collecting the Flow fresh each time means a frame of
+    // Read from the eager state, not the preference Flow, to avoid a frame of
     // the wrong bar before the stored answer arrives.
     val simplified = App.layoutMode.collectAsState().value == LayoutMode.SIMPLIFIED
     if (simplified && onSearch != null && onNowPlaying != null && onBrowse != null) {
@@ -1024,11 +873,8 @@ private fun SimplifiedNavbar(
     searchActive: Boolean,
 ) {
     val artworkEdge = px(EDGE_GLYPH_PX)
-    // The end glyphs line up with that edge — the left one's left edge, the
-    // right one's right edge, each the same distance in. They are centred in
-    // boxes of the bar's own height, so the padding is that distance less the
-    // slack the glyph already has inside its box; the two differ because the
-    // two glyphs are drawn at different sizes.
+    // The end glyphs align to this edge. Padding is reduced by each glyph's own
+    // slack inside its box, which differs because the glyphs draw at different sizes.
     val tile = px(BOTTOM_BAR_PX)
     val librarySlack = (tile - px(NAV_ICON_PX) * navScale(LIBRARY_DRAWN_PX, TALL_TARGET_PX)) / 2
     val searchSlack = (tile - px(NAV_ICON_PX) * SEARCH_SCALE) / 2
@@ -1043,16 +889,8 @@ private fun SimplifiedNavbar(
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        // Exactly one of these is where you are. The library covers the index
-        // and everything reached from it, which is everything this bar can be
-        // seen over that isn't search — the player is a screen of its own and
-        // hides the bar entirely, so it is never the lit one.
-        //
-        //
-        // The library at the left, always drawn as the library. It used to show
-        // whichever tab you were on with a chevron beside it, which made it a
-        // control for changing that — it is a place you go instead. Brought to
-        // the same rendered height as the Albums tab it stands in for.
+        // The library tile, not the current tab. It's a place you go to, not a
+        // control for changing tabs.
         NavTile(
             AppIcons.LibraryMusic,
             active = !searchActive,
@@ -1060,9 +898,8 @@ private fun SimplifiedNavbar(
             box = BOTTOM_BAR_PX,
         ) { onBrowse?.invoke() }
         Spacer(Modifier.weight(1f))
-        // The player in the middle: the one thing in this bar that isn't
-        // somewhere to browse, and under this layout the bar is the only route
-        // to it.
+        // The one tile that isn't a place to browse. Under this layout, the bar
+        // is the only route to the player.
         NavTile(AppIcons.Waveform, active = false, scale = NOW_PLAYING_SCALE) { onNowPlaying() }
         Spacer(Modifier.weight(1f))
         NavTile(
@@ -1073,11 +910,7 @@ private fun SimplifiedNavbar(
     }
 }
 
-/**
- * Standard layout: 5-button navbar with separate tabs for Playlists, Artists, Albums,
- * Songs, and Search. This is the classic light-amp navigation with all library views
- * directly accessible from the bottom bar.
- */
+/** Standard layout: 5-button navbar with separate tabs for Playlists, Artists, Albums, Songs, and Search. */
 @Composable
 private fun StandardNavbar(
     current: LibraryTab?,
@@ -1092,16 +925,12 @@ private fun StandardNavbar(
         horizontalArrangement = Arrangement.SpaceEvenly,
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        // Every tab goes through [onSelect] — never LibraryNav directly. This
-        // same bar is drawn over the shell and over the pages pushed on top of
-        // it, and only the caller knows which: from a sub-page, choosing a tab
-        // has to unwind the stack as well as change the tab. Three of these
-        // once set the tab themselves, so from an album page they moved the
-        // shell underneath and left the album sitting on top of it — the tap
-        // did nothing you could see.
+        // Every tab goes through [onSelect], never LibraryNav directly: this bar
+        // is also drawn over sub-pages, where selecting a tab must unwind the
+        // stack as well as change it.
         //
-        // A source with no server has nowhere to keep a playlist, so the tab
-        // isn't there to be tapped — see MusicSource.supportsPlaylists.
+        // A source with no server has nowhere to keep a playlist. See
+        // MusicSource.supportsPlaylists.
         if (App.source.collectAsState().value.supportsPlaylists) {
             NavIcon(
                 AppIcons.QueueMusic,
@@ -1125,16 +954,9 @@ private fun StandardNavbar(
             current == LibraryTab.SONGS,
             scale = navScale(SONGS_DRAWN_PX, TALL_TARGET_PX),
         ) { onSelect(LibraryTab.SONGS) }
-        // The player is the fifth destination: the one thing here you arrive at
-        // rather than browse to, so it sits after the four ways of looking at
-        // the same library rather than among them. It took search's place —
-        // search is a field at the top of each of those four lists now, which is
-        // where you already are when you want it, and the player was in a corner
-        // of the header where a bar button is easier to reach.
-        //
-        // Never lit: the player is a screen of its own and hides this bar, so it
-        // is never the tab you are on. Drawn at the same 80px as the simplified
-        // bar's, so the two layouts agree about how big this glyph is.
+        // Fifth destination, after the four browse tabs. Never lit, since the
+        // player screen hides this bar entirely. Drawn at the simplified bar's
+        // 80px so both layouts agree on size.
         if (onNowPlaying != null) {
             NavIcon(AppIcons.Waveform, active = false, scale = NOW_PLAYING_SCALE) { onNowPlaying() }
         }
@@ -1152,8 +974,7 @@ private fun NavIcon(
     lift: Int = 0,
     onClick: () -> Unit,
 ) {
-    // The selected tab gets a tile behind it — the same way the queue button
-    // marks itself on the player. Its colour comes from the theme, so Invert
+    // The selected tab gets a tile behind it, colored from the theme so Invert
     // Colors still works.
     Box(
         modifier = Modifier
@@ -1168,11 +989,8 @@ private fun NavIcon(
         AppIcon(
             icon = icon,
             size = px(NAV_ICON_PX) * scale,
-            // Inverted out of the white tile, or — with no tile — simply the
-            // bright one among dimmer neighbours. The secondary grey was too
-            // close to white here to read as a difference at all, so the
-            // unselected glyphs carry an explicit alpha instead.
-            // The tab you are on is simply the bright one; the rest step back.
+            // Unselected glyphs dim via explicit alpha rather than the theme's
+            // secondary grey, which reads too close to white here.
             tint = LightThemeTokens.colors.content,
             modifier = (if (active) Modifier else Modifier.alpha(NAV_DIM_ALPHA))
                 .offset(y = -px(lift)),
@@ -1180,7 +998,7 @@ private fun NavIcon(
     }
 }
 
-/** A bar button with no tab behind it — Simplified's search and player. */
+/** A bar button with no tab behind it. Simplified's search and player. */
 @Composable
 private fun NavTile(
     icon: ImageVector,
@@ -1201,20 +1019,14 @@ private fun NavTile(
     ) {
         AppIcon(
             icon = icon,
-            // The size the tabs are drawn at, so the bar reads as one row
-            // whichever layout is showing. A 71px box was a measure of its own and
-            // came out visibly smaller than the standard bar's glyphs beside it.
+            // Matches the tabs' drawn size so the bar reads as one row, whichever
+            // layout is showing.
             size = px(NAV_ICON_PX) * scale,
             tint = LightThemeTokens.colors.content,
             modifier = if (active) Modifier else Modifier.alpha(NAV_DIM_ALPHA),
         )
     }
 }
-
-/**
- * Standard layout tab icon with scaling and optional lift for visual alignment.
- * Used in the 5-button standard navbar layout.
- */
 
 private const val NAV_TILE_PX = 144
 private const val NAV_TILE_RADIUS_PX = 6
@@ -1224,40 +1036,20 @@ private const val NAV_TILE_RADIUS_PX = 6
 /** The tile a selected tab inverts into, and the glyph inside it. */
 private const val NAV_ICON_PX = 114
 
-/** Matches the player's secondary row — the app's one "present but not chosen". */
+/** Matches the player's secondary row, the app's one "present but not chosen" style. */
 private const val NAV_DIM_ALPHA = 0.45f
 
 /**
- * Bringing the tab glyphs closer to one height.
- *
- * A Material icon fills its 24dp viewport differently depending on its shape —
- * a mic is tall and narrow, a playlist is wide and short, a pair of sleeves goes
- * corner to corner — so one box size draws wildly different things. At the
- * shared box the bar ran from 66px (playlists) to 90px (artists), which read as
- * four icons in three sizes rather than as one row.
- *
- * `*_DRAWN_PX` is what each glyph actually drew at that shared box, measured off
- * the panel; the target is what it should draw instead. Re-measure rather than
- * guess if a glyph changes.
- *
- * The playlist glyph is the reference and is left alone — the tall ones were
- * what read wrong, and growing the smallest to meet them halfway only moved the
- * problem onto it.
+ * Brings the tab glyphs closer to one height. `*_DRAWN_PX` is what each glyph
+ * actually draws at the shared box, measured off the panel; re-measure rather
+ * than guess if a glyph changes. The playlist glyph is the reference and is
+ * left alone.
  */
 private const val ARTISTS_DRAWN_PX = 90
-// Measured at 89 while the old 0.85 trim was still applied, so untrimmed it is
-// 89 / 0.85 — the others were measured with no scale on them at all.
 private const val ALBUMS_DRAWN_PX = 105
 private const val SONGS_DRAWN_PX = 86
 
-/**
- * The simplified bar's library glyph, which stands in for the Albums tab.
- *
- * Its own measure, not the album stack's: the stack is two offset squares that
- * fill the box and needs the heaviest trim of the set, and lending that trim to
- * a glyph that doesn't over-draw the same way left this one visibly small. An
- * estimate rather than a panel measurement — re-measure if it still reads off.
- */
+/** The simplified bar's library glyph, standing in for the Albums tab. Its own measure, not the album stack's. */
 private const val LIBRARY_DRAWN_PX = 95
 
 /** Where the tall glyphs land: above the playlist's own 66, well under their 90. */
@@ -1268,13 +1060,7 @@ private const val ARTISTS_TARGET_PX = 75
 
 private fun navScale(drawnPx: Int, targetPx: Int): Float = targetPx.toFloat() / drawnPx
 
-/**
- * How far the outer edge of a glyph sits from the screen's edge, for the bars
- * that stand against them — the simplified nav bar, and the queue's shuffle and
- * repeat. A pixel inside where a list row's artwork begins (LIST_EDGE_PX plus a
- * row's 1.5-unit inset comes to 81), taken to the round number, which is also
- * half the bar's height.
- */
+/** Distance from a glyph's outer edge to the screen edge, for bars that stand against it. */
 const val EDGE_GLYPH_PX = 80
 
 /** A shade off the reference size, and a shade higher in the tile. Judged by eye. */
@@ -1286,16 +1072,7 @@ private const val PLAYLISTS_LIFT_PX = 5
 /** The magnifier, at the same reference size as the rest of the bar. */
 private const val SEARCH_SCALE = PLAYLISTS_SCALE
 
-/**
- * The waveform, at the 80px box LightOS itself gives it — two of the LP3's 27
- * grid units, and what Bard draws the same glyph at.
- *
- * It used to be a trim off the bar's shared box, which drew it at 99px: a
- * quarter larger than anywhere else this glyph appears, and off the pixel grid
- * besides. 80px is 2px to each unit of its 40-unit viewport, so its bars land
- * whole. Unlike the tab scales below it this is a size rather than an
- * equalisation, so it is stated in px and the scale falls out of it.
- */
+/** The waveform, at the 80px box LightOS gives it. */
 private const val NOW_PLAYING_PX = 80
 private val NOW_PLAYING_SCALE = NOW_PLAYING_PX.toFloat() / NAV_ICON_PX
 

@@ -10,18 +10,11 @@ import kotlinx.coroutines.delay
 import kotlinx.serialization.json.Json
 
 /**
- * Linking a Plex account, and finding the servers on it.
- *
- * The PIN flow rather than a password: the app asks plex.tv for a four-character
- * code, shows it, and the user types it at **plex.tv/link** on whatever device
- * they already have to hand. Nothing is typed on the phone, which on this
- * keyboard is the difference between a minute and a fight — and the app never
- * sees a password.
- *
- * The token that comes back is also what lists the account's servers, so the
- * user never types a server address either: [resources] returns each one with
- * its local, remote and relay URIs, and [reachable] picks the first that
- * answers.
+ * Links a Plex account via the PIN flow: the app requests a short code from
+ * plex.tv, the user enters it at plex.tv/link on another device, and the
+ * phone never handles a password. The resulting token also lists the
+ * account's servers; [resources] returns their URIs and [reachable] picks
+ * the first one that answers.
  */
 object PlexAccount {
 
@@ -36,24 +29,16 @@ object PlexAccount {
     }
 
     /**
-     * Ask for a code. Null when plex.tv can't be reached.
-     *
-     * Deliberately *not* `strong=true`: that returns a long random string, which
-     * is right for a machine-to-machine link and wrong here. The short code is
-     * the one plex.tv/link accepts, and the one a person can read off a phone
-     * and type somewhere else.
+     * Asks for a code. Null if plex.tv can't be reached.
+     * Uses the short code, not `strong=true`. The short code is what
+     * plex.tv/link accepts and what a person can read and retype.
      */
     suspend fun requestPin(): PlexPin? = runCatching {
         val response = http.post("$PLEX_TV/api/v2/pins") { plexHeaders() }
         json.decodeFromString<PlexPin>(response.bodyAsText())
     }.getOrNull()
 
-    /**
-     * Poll until the code is claimed, or give up.
-     *
-     * Plex expires a PIN after fifteen minutes; this stops well short of that,
-     * because a code left on screen that long has been abandoned.
-     */
+    /** Polls until the code is claimed, or gives up well before Plex's 15-minute PIN expiry. */
     suspend fun awaitToken(pin: PlexPin, onTick: (Int) -> Unit = {}): String? {
         repeat(POLL_ATTEMPTS) { attempt ->
             delay(POLL_INTERVAL_MS)
@@ -77,27 +62,14 @@ object PlexAccount {
             .filter { it.provides.contains("server") }
     }.getOrDefault(emptyList())
 
-    /**
-     * The first connection that answers, local ones first.
-     *
-     * A server usually advertises several addresses — a LAN one, a public one
-     * and a relay. The LAN address is the fastest when you're at home and dead
-     * when you're not, so they're tried in that order rather than guessed at.
-     */
-    /** Every advertised address, best first — local, then direct, then relay. */
+    /** Every advertised address, best first: local, then direct, then relay. */
     fun candidates(resource: PlexResource): List<String> =
         resource.connections
             .sortedWith(compareBy({ !it.local }, { it.relay }))
             .map { it.uri.trimEnd('/') }
             .distinct()
 
-    /**
-     * The first advertised address that answers.
-     *
-     * Local first because it is faster and avoids Plex's relay — but see
-     * [MusicSource.connections]: the rest are kept so this can be redone when
-     * the network changes underneath a source.
-     */
+    /** The first advertised address that answers, local addresses tried first. */
     suspend fun reachable(resource: PlexResource, token: String): String? {
         val ordered = resource.connections.sortedWith(
             compareBy({ !it.local }, { it.relay }),

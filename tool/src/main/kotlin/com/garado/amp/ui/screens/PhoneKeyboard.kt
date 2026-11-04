@@ -9,34 +9,19 @@ import com.thelightphone.sdk.ui.defaultKeyboardOptions
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 
-/**
- * The last answer LightOS gave, so a later keyboard opens with the phone's
- * settings rather than the SDK's defaults while the question is asked again.
- */
+/** Cached fallback for [rememberPhoneKeyboardOptions] while LightOS is asked again. */
 private var lastKnown: KeyboardOptions? = null
 
 /**
- * The keyboard as the phone has it set — swipe typing, key animation, the
- * voice key — asked of LightOS when a keyboard appears.
+ * Keyboard options (swipe typing, key animation, voice key) as set in LightOS.
+ * Queried once per keyboard instance rather than per recomposition.
  *
- * The keyboard is a library every tool ships a copy of; the settings for it are
- * the phone's, and only LightOS knows them. Amp used to hand every keyboard the
- * SDK's fixed defaults, so a phone with swipe typing on typed without it here.
- * The SDK's own tools ask through `rememberKeyboardOptions`, which asks again
- * on every recomposition — on the search page that would be a call per
- * keystroke — so this asks once per keyboard and keeps the answer. LightOS not
- * answering, an older build or a hiccup, leaves the defaults in place, which is
- * exactly what the keyboard showed before.
+ * Emoji is always disabled: an empty emoji list makes the keyboard library draw
+ * a spacer instead of an emoji key.
  *
- * **No emoji, anywhere in Amp.** The phone's emoji set is a messaging
- * preference, and nothing typed here is a message: a search, a server address,
- * a playlist name, a password. The library draws the emoji key only when it is
- * handed some, and puts a spacer in its place otherwise — so an empty set is
- * the keyboard's own no-emoji state, not a layout of ours.
- *
- * [swipe] pins swipe typing regardless of the setting. The password screen
- * turns it off: its keyboard masks what is typed and has no words to offer, so
- * a swiped word would be silently dropped — see MaskedKeyboardCallback.
+ * [swipe] overrides the LightOS setting. Pass false for masked input fields,
+ * since a masked keyboard has no word suggestions and would silently drop a
+ * swiped word (see MaskedKeyboardCallback).
  */
 @Composable
 fun rememberPhoneKeyboardOptions(swipe: Boolean? = null): StateFlow<KeyboardOptions> {

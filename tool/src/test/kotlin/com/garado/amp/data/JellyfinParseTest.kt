@@ -6,14 +6,7 @@ import kotlin.test.assertTrue
 import kotlinx.serialization.json.Json
 import org.junit.Test
 
-/**
- * The parts of the Jellyfin mapping that are easy to get quietly wrong, pinned
- * against payloads shaped like the server's own.
- *
- * Every case here is a mistake that costs nothing at compile time and shows up
- * as a library that looks *nearly* right: durations out by a factor of ten
- * thousand, a compilation by nobody, covers that 404 one row at a time.
- */
+/** Jellyfin JSON edge cases that compile fine but silently produce wrong data. */
 class JellyfinParseTest {
 
     private val json = Json {
@@ -35,8 +28,8 @@ class JellyfinParseTest {
 
     @Test
     fun `a track carries its own artist, not the record's`() {
-        // The trap a compilation sets: every row's album artist is "Various
-        // Artists", so a client reading that shows a shelf of songs by nobody.
+        // Compilation albums tag every row's albumArtist as "Various Artists";
+        // the per-track artist is a separate field.
         val track = item(
             """
             {
@@ -54,8 +47,8 @@ class JellyfinParseTest {
 
     @Test
     fun `a cover is claimed only where the item says it has one`() {
-        // Jellyfin serves /Items/{anything}/Images/Primary and only 404s when
-        // the bytes are asked for, so this cannot be assumed from the id alone.
+        // Jellyfin returns an image URL for any id and 404s only when the bytes
+        // are fetched, so presence must come from ImageTags, not the id.
         val withCover = item("""{"Id":"al","Name":"X","ImageTags":{"Primary":"abc"}}""")
         assertEquals("al", withCover.imageId())
 
@@ -130,14 +123,14 @@ class JellyfinParseTest {
         val anonymous = JellyfinClient.authorization()
         assertTrue(anonymous.startsWith("MediaBrowser "))
         assertTrue(anonymous.contains("""Client="Amp""""))
-        // Sign-in happens before there is a token, and a Token="" would be sent
-        // as a credential the server then rejects.
+        // No token exists before sign-in; an empty Token="" would be sent as a
+        // credential and rejected by the server.
         assertTrue(!anonymous.contains("Token="))
 
         val named = JellyfinClient.authorization(product = "Kitchen", token = "abc123")
         assertTrue(named.contains("""Client="Kitchen""""))
         assertTrue(named.contains("""Token="abc123""""))
-        // The device stays the hardware — two sources are still one phone.
+        // The device stays the hardware: two sources are still one phone.
         assertTrue(named.contains("""Device="Light Phone III""""))
     }
 

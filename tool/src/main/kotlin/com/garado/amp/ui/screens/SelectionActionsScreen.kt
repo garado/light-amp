@@ -15,9 +15,8 @@ import com.thelightphone.sdk.SimpleLightScreen
 /**
  * What to do with a multi-selection.
  *
- * Returns true when the caller should leave selection mode — i.e. the action was
- * carried out — and false when the user backed out, so a mis-tap doesn't discard
- * a selection that took a while to build.
+ * Returns true when the action was carried out and the caller should leave
+ * selection mode, false when the user backed out.
  */
 class SelectionActionsScreen(
     sealed: SealedLightActivity,
@@ -28,7 +27,7 @@ class SelectionActionsScreen(
     private val showDownload: Boolean = true,
 ) : SimpleLightScreen<Boolean>(sealed) {
 
-    // While casting, the rocker belongs to the speaker — see handleVolumeKey.
+    // While casting, the rocker belongs to the speaker, see handleVolumeKey.
     override fun onKeyDown(keyCode: Int, event: KeyEvent): Boolean =
         App.playback.handleVolumeKey(keyCode) || super.onKeyDown(keyCode, event)
 
@@ -42,8 +41,8 @@ class SelectionActionsScreen(
             ActionList {
                 if (source.supportsPlaylists) {
                 TextRow(title = "Add to Playlist") {
-                    // Unwind only once the picker reports back: calling goBack()
-                    // straight after the push would pop the picker instead.
+                    // Wait for the picker's result callback instead of calling goBack()
+                    // immediately, which would pop the picker instead.
                     navigateTo<Unit>(
                         { AddToPlaylistScreen(it, tracks.map { t -> t.id }) },
                         resultCallback = { goBack(true) },

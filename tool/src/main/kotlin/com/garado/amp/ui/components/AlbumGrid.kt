@@ -31,15 +31,8 @@ import com.garado.amp.ui.pxSp
 import com.thelightphone.sdk.ui.LightThemeTokens
 
 /**
- * Albums as a wall of sleeves: three across, tightly spaced, no words.
- *
- * A record is its cover — for anyone who knows their own library, a grid of
- * artwork is faster to read than a column of titles, and it fits four times as
- * many on a screen. Titles aren't dropped so much as deferred: the album's own
- * page carries all of them, and this is the way in.
- *
- * The A–Z strip works here exactly as it does on the list, because both are
- * driven by item indices — see [ScrollTarget].
+ * Album covers in a grid, three across. The A-Z strip uses item indices, same
+ * as [ScrollTarget] on the list view.
  */
 @Composable
 fun AlbumGrid(
@@ -47,40 +40,23 @@ fun AlbumGrid(
     onOpen: (Album) -> Unit,
     modifier: Modifier = Modifier,
     state: LazyGridState = rememberLazyGridState(),
-    /**
-     * Room down the right edge for scroll furniture.
-     *
-     * Zero by default: the grid has none, which is the point — the covers get
-     * the whole width instead.
-     */
+    /** Room down the right edge for scroll furniture. */
     endInset: Dp = px(LIST_EDGE_PX),
     onLongPress: ((Album) -> Unit)? = null,
     header: (LazyGridScope.() -> Unit)? = null,
 ) {
-    // Long enough to be worth one. A discography or a shelf of favourites is a
-    // couple of flicks from top to bottom, where a bar is furniture you have to
-    // look past rather than something you would ever reach for — and the covers
-    // give up width for it either way. Counted in albums rather than in what the
-    // layout reports visible, so the answer is the same on the first frame as on
-    // the second and the grid doesn't reflow under you.
+    // Counted by album count, not by what the layout reports as visible, so the
+    // result is stable on the first frame and the grid doesn't reflow.
     val longEnough = albums.size >= GRID_BAR_MIN_ITEMS
-    // Always on, for any list long enough to be worth dragging.
     val furniture = longEnough
-    // Read unconditionally: behind an `if`, this stops subscribing to the state
-    // it reads and the bar freezes where it was — the same trap the songs tab
-    // documents for collectAsState.
+    // Must be read unconditionally. Reading it only inside an `if` stops
+    // subscribing to the state and the bar freezes in place.
     val target = rememberScrollTarget(state)
     Box(modifier = modifier.fillMaxSize()) {
     LazyVerticalGrid(
         columns = GridCells.Fixed(GRID_COLUMNS),
         state = state,
         modifier = Modifier.fillMaxSize(),
-        // Only the right edge gives way. The covers stay hard against the left,
-        // and the lane is taken out of the width they share — so turning the bar
-        // on costs a little sleeve rather than the alignment of the whole grid.
-        // The lane is narrower than a list's: a list insets its text far enough
-        // to keep a long title clear of the letters, and a grid has no such
-        // problem — the covers can come right up to the bar.
         contentPadding = PaddingValues(
             start = px(LIST_EDGE_PX),
             end = if (furniture) px(GRID_SCROLLBAR_LANE_PX) else endInset,
@@ -109,12 +85,7 @@ fun AlbumGrid(
     }
 }
 
-/**
- * One sleeve, filling its cell.
- *
- * Not [AppArtwork]: that one takes a fixed size, which is the wrong shape of
- * answer here — the grid decides how wide a cell is, and the cover follows.
- */
+/** One cover, filling its grid cell. Doesn't use [AppArtwork], which takes a fixed size. */
 @Composable
 private fun GridCover(album: Album) {
     val density = LocalDensity.current
@@ -134,8 +105,7 @@ private fun GridCover(album: Album) {
                 modifier = Modifier.matchParentSize(),
             )
         } else {
-            // A sleeveless record still needs to be a target, and a title would
-            // be the only thing in a grid that has none.
+            // Fallback when there's no artwork: show the title instead.
             AppText(
                 album.title,
                 pxSp(GRID_FALLBACK_PX),
@@ -148,35 +118,18 @@ private fun GridCover(album: Album) {
     }
 }
 
-/**
- * The lane the grid's scroll bar lives in, and the room the covers give up for
- * it. Only wide enough to hold the bar and stay grabbable — the point of a grid
- * is the covers, so the bar sits hard against the edge with the artwork tight
- * against it rather than floating in a list's wider gutter.
- */
+/** Width of the lane the grid's scroll bar lives in. */
 private const val GRID_SCROLLBAR_LANE_PX = 30
 
-/**
- * Albums below which the grid goes without a bar — about three screens of
- * covers at three across, which is the point where scrolling stops being one
- * gesture and starts being a journey.
- */
+/** Minimum album count before the grid shows a scroll bar. */
 private const val GRID_BAR_MIN_ITEMS = 30
 
-/**
- * Three across, with the gaps tight enough that the covers read as a wall.
- *
- * Not configurable. Two-across and titles-under-covers were both options once;
- * three bare covers is what the screen is for, and a setting for every taste is
- * its own kind of clutter on a phone that exists to have less of it.
- */
 private const val GRID_COLUMNS = 3
 private const val GRID_GAP_PX = 12
 
 /**
- * Nominal cell size, used only to pick the decode resolution — the cells
- * themselves are sized by the grid. Close to the real width on the LP3: the
- * content is 1080 less the edges and the strip, split three ways.
+ * Nominal cell size used only to pick decode resolution; actual cell size is
+ * set by the grid.
  */
 private const val GRID_CELL_PX = 300
 private const val GRID_CORNER_PX = 6

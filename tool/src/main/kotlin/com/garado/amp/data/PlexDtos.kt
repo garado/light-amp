@@ -7,12 +7,9 @@ import kotlinx.serialization.json.JsonPrimitive
 
 /**
  * Just enough of Plex's JSON to build the app's own models.
- *
- * Plex answers XML by default and JSON with `Accept: application/json`; every
- * response is one `MediaContainer` holding a list under a name that depends on
- * what was asked for — `Directory` for library sections, `Metadata` for
- * anything with a rating key. Fields are all optional because Plex omits rather
- * than nulls, and a music library missing a year or a cover is ordinary.
+ * Plex serves XML by default and JSON with `Accept: application/json`.
+ * Every response is one `MediaContainer`. Fields are optional since Plex
+ * omits absent values rather than sending null.
  */
 @Serializable
 data class PlexResponse(@SerialName("MediaContainer") val container: PlexContainer = PlexContainer())
@@ -35,13 +32,9 @@ data class PlexDirectory(
     val type: String = "",
     val title: String = "",
     /**
-     * Set while the server is walking this section's files.
-     *
-     * A [JsonElement] rather than a Boolean because Plex is inconsistent about
-     * how it writes one — `true` here, `1` there. Declared as a Boolean, the
-     * numeric form doesn't fail loudly: `coerceInputValues` quietly substitutes
-     * the default, so a server mid-scan reports as idle and anything waiting on
-     * it stops waiting immediately.
+     * Set while the server is scanning this section. A [JsonElement] because
+     * Plex writes this inconsistently (`true` or `1`); as a Boolean, the
+     * numeric form would silently read as false via `coerceInputValues`.
      */
     val refreshing: JsonElement? = null,
 ) {
@@ -52,10 +45,9 @@ data class PlexDirectory(
 @Serializable
 data class PlexMetadata(
     /**
-     * Set on a smart playlist — one Plex builds from a filter rather than a
-     * list. A [JsonElement] for the same reason as [PlexMediaContainer.refreshing]:
-     * Plex writes `1` in some responses and `true` in others, and a Boolean
-     * field would silently read the numeric form as false.
+     * Set on a smart playlist, one Plex builds from a filter. A
+     * [JsonElement] for the same reason as [PlexDirectory.refreshing]: Plex
+     * writes `1` or `true` inconsistently.
      */
     val smart: JsonElement? = null,
     val ratingKey: String = "",
@@ -63,9 +55,9 @@ data class PlexMetadata(
     val type: String = "",
     val title: String = "",
     /**
-     * A track's *own* artist, sent only when it differs from the album artist.
-     * On a compilation this is the one that matters — [grandparentTitle] would
-     * put "Various Artists" against every song.
+     * A track's own artist, sent only when it differs from the album artist.
+     * On a compilation, [grandparentTitle] would put "Various Artists"
+     * against every song instead.
      */
     val originalTitle: String? = null,
     /** The album, on a track; the artist, on an album. */
@@ -89,12 +81,12 @@ data class PlexMetadata(
     val composite: String? = null,
     val lastViewedAt: Long? = null,
     val viewCount: Int? = null,
-    /** Plex rates 0–10; the app works in 1–5 stars. */
+    /** Plex rates 0-10; the app uses a 0-100 scale. */
     val userRating: Float? = null,
     /**
-     * A track's position *within a playlist*, which is not its rating key: the
-     * same song can sit in a playlist twice, and removing or moving one of them
-     * needs the id of that entry rather than of the song.
+     * A track's position within a playlist, not its rating key: the same
+     * song can appear in a playlist twice, and edits need the entry id,
+     * not the song id.
      */
     val playlistItemID: Long? = null,
     @SerialName("Genre") val genres: List<PlexTag> = emptyList(),
@@ -105,7 +97,7 @@ data class PlexMetadata(
         get() = (smart as? JsonPrimitive)?.content?.lowercase() in setOf("true", "1")
 }
 
-/** Plex's tag shape — genres, moods, styles all arrive as `{ "tag": "..." }`. */
+/** Plex's tag shape. Genres, moods, and styles all arrive as `{ "tag": "..." }`. */
 @Serializable
 data class PlexTag(val tag: String = "")
 
@@ -125,15 +117,12 @@ data class PlexPart(
 )
 
 /**
- * One track of media inside a file: `streamType` is 1 for video, 2 for audio,
- * 3 for subtitles and 4 for lyrics.
+ * One track of media inside a file. `streamType`: 1 video, 2 audio,
+ * 3 subtitles, 4 lyrics.
  *
- * Lyrics are not necessarily a file beside the song. Plex's own LyricFind agent
- * supplies most of them, and those carry no path on disk — measured 2026-09-03,
- * where every lyric stream that served fine reported `provider=lyricfind` and no
- * `file`. So there is nothing in a stream's fields that tells a fetchable one
- * from a dud: the occasional 404 from `/library/streams/{id}` is the server
- * missing content it indexed, and the only way to find out is to ask.
+ * A lyric stream may have no file on disk (Plex's LyricFind agent supplies
+ * most lyrics without one). No field distinguishes a fetchable stream from
+ * one the server will 404 on; the only way to know is to ask.
  */
 @Serializable
 data class PlexStream(
@@ -160,7 +149,7 @@ data class PlexResource(
     val provides: String = "",
     val accessToken: String? = null,
     val owned: Boolean = false,
-    /** "Plex for Apple TV", "Plexamp", … — which app the device is. */
+    /** "Plex for Apple TV", "Plexamp", etc. Which app the device is. */
     val product: String = "",
     /** Whether plex.tv believes the device is currently reachable. */
     val presence: Boolean = false,

@@ -6,11 +6,7 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNull
 
-/**
- * The Companion bodies are the only XML the tool itself parses, and the parser
- * is a hand-rolled attribute scan — exactly the sort of thing that quietly
- * breaks on an entity or a similar tag name, so it is pinned down here.
- */
+/** A hand-rolled XML attribute scan, tested against entities and similar tag names. */
 class PlexCompanionParsingTest {
 
     @Test
@@ -70,8 +66,8 @@ class PlexCompanionParsingTest {
 
     @Test
     fun `controllable carries what the player accepts`() {
-        // The Apple TV over optical: it reports a level it does not own, and
-        // says as much by leaving volume out of the list.
+        // A device can report a volume value while excluding "volume" from
+        // controllable, meaning it does not actually own volume control.
         val atv = """
             <MediaContainer><Timeline type="music" state="playing" time="1000" volume="0"
               controllable="playPause,stop,seekTo,skipPrevious,skipNext,shuffle,repeat"/></MediaContainer>

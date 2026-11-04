@@ -75,24 +75,14 @@ import com.thelightphone.sdk.ui.LightThemeTokens
 object AppIcons {
     val Album = Icons.Filled.Album
 
-    /**
-     * The Albums tab: two square sleeves, one behind the other.
-     *
-     * A disc belongs to a track that is playing; a *stack* is what the tab holds.
-     * FilterNone is Material's plain pair of offset squares — the same shape
-     * Apple uses for its own Albums list, and the only geometric one in the set.
-     */
+    /** The Albums tab icon: two offset squares, representing a stack of sleeves. */
     val AlbumStack = Icons.Filled.FilterNone
     val MusicNote = Icons.Filled.MusicNote
-    /**
-     * A filled mic, to sit at the same weight as the note and the disc beside it
-     * — LightOS's own is a thin outline and read as a hole in the row.
-     */
+    /** Filled mic, to match the visual weight of the icons next to it. */
     val RecordVoiceOver = Icons.Filled.Mic
     val QueueMusic = Icons.AutoMirrored.Filled.QueueMusic
     val PlaylistPlay = Icons.AutoMirrored.Filled.PlaylistPlay
     val Folder = Icons.Filled.Folder
-    /** The ••• overflow menu — horizontal dots, as every doc comment calls it. */
     val MoreHoriz = Icons.Filled.MoreHoriz
     val GraphicEq = Icons.Filled.GraphicEq
 
@@ -100,16 +90,12 @@ object AppIcons {
     val Waveform = WaveformSymbol
     val Lyrics = Icons.Filled.Lyrics
 
-    /**
-     * Leaving Now Playing goes back to the library, so the button says so — and
-     * the simplified bar's middle button, which is that same library.
-     */
     val LibraryMusic = Icons.Filled.LibraryMusic
 
-    /** Genres, on the library index: a tag is what a genre is. */
+    /** Genres, on the library index. */
     val Genre = Icons.Filled.LocalOffer
 
-    /** Composers, on the library index — written, rather than performed. */
+    /** Composers, on the library index. */
     val Composer = Icons.Filled.HistoryEdu
     val Sort = Icons.AutoMirrored.Filled.Sort
     val Favorite = Icons.Filled.Favorite
@@ -139,7 +125,7 @@ object AppIcons {
     val FormatListBulleted = Icons.AutoMirrored.Filled.FormatListBulleted
     val VolumeUp = Icons.AutoMirrored.Filled.VolumeUp
 
-    /** Output routing — a speaker cabinet, not a volume level. */
+    /** Output routing, not volume level. */
     val Speaker = Icons.Filled.Speaker
     val VolumeDown = Icons.AutoMirrored.Filled.VolumeDown
     val Bluetooth = Icons.Filled.Bluetooth
@@ -153,7 +139,6 @@ object AppIcons {
     val Download = Icons.Filled.Download
     val DownloadDone = Icons.Filled.DownloadDone
 
-    /** Light marks a downloaded row with the same arrow it downloads with. */
     val Downloaded = Icons.Filled.Download
     val CloudOff = Icons.Filled.CloudOff
 }
@@ -173,7 +158,7 @@ fun AppIcon(
     )
 }
 
-/** Same shape, for a LightOS glyph — Light Music's own icon set, not this app's Material one. */
+/** Same as [AppIcon] above, for icons from LightOS's own icon set instead of Material. */
 @Composable
 fun AppIcon(
     icon: LightIconConfiguration,
@@ -189,17 +174,7 @@ fun AppIcon(
     )
 }
 
-/**
- * Text in the LP3 font at an exact size. [dim] applies the original app's 0.5
- * opacity used for secondary lines (artist, subtitle).
- */
-/**
- * Which of the LP3's type styles a string belongs to.
- *
- * The app sets its own sizes — those are tuned to this screen's grid — but weight
- * and tracking now come from the Light design language instead of being forced to
- * Regular/0 everywhere, which flattened the whole scale into one style.
- */
+/** Which of the LP3's type styles a string belongs to. */
 enum class TextRole { Title, Heading, Subheading, Copy, Button, Detail, Fine }
 
 @Composable
@@ -217,11 +192,9 @@ private fun TextRole.style(): TextStyle {
 }
 
 /**
- * A role's tracking, re-expressed for the size actually being drawn.
- *
- * The SDK states letter spacing in absolute sp against its own font size — button
- * is 4.5sp at 30sp, i.e. 0.15em. Copying that number onto a 15sp label would give
- * 0.3em and look broken, so convert to a ratio and scale it.
+ * A role's letter spacing, scaled to the size actually being drawn. The SDK
+ * states spacing in absolute sp against its own font size, so it must be
+ * converted to a ratio before applying it to a different size.
  */
 private fun trackingFor(style: TextStyle, size: TextUnit): TextUnit {
     val spacing = style.letterSpacing
@@ -231,16 +204,9 @@ private fun trackingFor(style: TextStyle, size: TextUnit): TextUnit {
 }
 
 /**
- * Snap a requested weight to a face the LP3 actually ships.
- *
- * `/system/fonts` has AkkuratLLTT in Thin (100), Light (300), Regular (400),
- * Bold (700) and Black (900), plus italics — **but no Medium**. Asking for
- * `FontWeight.Medium` (500) is therefore silently a no-op: Android resolves it to
- * the nearest face, which is Regular, and Compose only synthesises a heavier face
- * from 600 up. The text comes out identical to body copy.
- *
- * So round *up* to the next face that exists rather than to the nearest one. "A bit
- * heavier" then actually renders heavier, instead of the request evaporating.
+ * Snap a requested weight to a face the LP3 actually ships. The device font has
+ * no Medium (500); Android silently resolves it to Regular, so requests round
+ * up to the next available face instead of to the nearest one.
  */
 private val DEVICE_WEIGHTS = listOf(
     FontWeight.Thin,
@@ -254,12 +220,9 @@ private fun onDeviceWeight(requested: FontWeight): FontWeight =
     DEVICE_WEIGHTS.firstOrNull { it.weight >= requested.weight } ?: FontWeight.Black
 
 /**
- * The style [AppText] draws with, exposed so it can also be *measured* with.
- *
- * Anything deciding whether a string fits has to lay it out in the same face,
- * size, weight and tracking it will be drawn in — a decision made against a
- * near-enough style is a decision about a different string. See the header's
- * fitted title.
+ * The style [AppText] draws with, exposed so it can also be measured. Fit
+ * checks must measure in this exact style, not an approximation, since a
+ * different face, size, weight, or tracking changes the measured width.
  */
 @Composable
 fun appTextStyle(
@@ -295,7 +258,7 @@ fun AppText(
     maxLines: Int = Int.MAX_VALUE,
     align: TextAlign? = null,
     overflow: TextOverflow = TextOverflow.Ellipsis,
-    /** Marks the current selection among a set of rows — see [TextRow]. */
+    /** Marks the current selection among a set of rows. See [TextRow]. */
     underline: Boolean = false,
 ) {
     val style = appTextStyle(size, lineHeight, role, weight, align, underline)
@@ -310,14 +273,9 @@ fun AppText(
 }
 
 /**
- * The stock LP3 fader: a hairline track with a thick fill and no knob, used for
- * seeking and for volume alike — the OS draws both the same way.
- *
- * Delegates to the SDK's own [LightProgressBar] rather than restating its
- * proportions (0.1 and 0.5 grid units), so the app follows the system if they
- * ever change. Only the drawing comes from the SDK: the touch handling stays
- * with each caller, which needs a scrub preview or a release-only commit that
- * `LightTouchableProgressBar` doesn't offer.
+ * The stock LP3 fader, used for both seeking and volume. Delegates drawing to
+ * the SDK's [LightProgressBar]; touch handling stays with each caller, since
+ * `LightTouchableProgressBar` doesn't support a scrub preview.
  */
 @Composable
 fun AppProgressBar(progress: Float) {

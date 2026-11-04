@@ -8,15 +8,12 @@ import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 
 /**
- * The index frame is read by decoders that were never told about this code,
- * so its layout is pinned byte by byte: the lengths here are the published
- * MPEG-1 Layer III frame sizes at 44.1 kHz, worked out independently of the
- * formula the indexer uses, and the field offsets are where ExoPlayer's
- * XingSeeker and LAME's VbrTag.c put them.
+ * Frame lengths are the published MPEG-1 Layer III sizes at 44.1 kHz.
+ * Field offsets match ExoPlayer's XingSeeker and LAME's VbrTag.c.
  */
 class Mp3VbrIndexTest {
 
-    // Frame lengths for MPEG-1 Layer III, 44.1 kHz, no padding.
+    // MPEG-1 Layer III, 44.1 kHz, no padding.
     private val lengthAt44k = mapOf(32 to 104, 64 to 208, 128 to 417, 192 to 626, 320 to 1044)
     private val indexAt44k = mapOf(32 to 1, 64 to 5, 128 to 9, 192 to 11, 320 to 14)
 
@@ -68,7 +65,6 @@ class Mp3VbrIndexTest {
         assertEquals(0, toc[0])
         assertTrue(toc.zipWithNext().all { (a, b) -> a <= b }, "TOC must not run backwards")
         assertTrue(toc.last() < 256)
-        // Everything after the index is the stream as it came, byte for byte.
         val indexLength = out.size - audio.size
         assertContentEquals(audio, out.copyOfRange(indexLength, out.size))
     }

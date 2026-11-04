@@ -11,19 +11,12 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 
 /**
- * The other half of a Companion subscription: somewhere for a player to push
- * its timeline to.
+ * The other half of a Companion subscription: a small HTTP server a player
+ * can push its timeline to, instead of being polled every second.
  *
- * Plex's own model is push, not poll — a controller subscribes and the player
- * sends its state as it changes. That needs the controller to be reachable,
- * which is all this is: a small HTTP server that accepts a timeline, answers
- * 200, and hands the body on. It replaces asking a player the same question
- * every second, which is chatty, blocks the player's single connection while
- * it happens, and tells us nothing between beats.
- *
- * Polling remains the fallback in [com.garado.amp.playback.PlaybackController]:
- * a player that won't subscribe, or a network that won't route back here, must
- * still work.
+ * Polling remains the fallback in
+ * [com.garado.amp.playback.PlaybackController] for a player that won't
+ * subscribe, or a network that can't route back here.
  */
 class PlexCompanionListener(private val onTimeline: (String) -> Unit) {
 
@@ -66,17 +59,14 @@ class PlexCompanionListener(private val onTimeline: (String) -> Unit) {
     }
 
     /**
-     * Read one request, answer 200, and pass the timeline on.
-     *
-     * A player sends its state as the request body, or as the query of a GET
-     * when it has nothing to post — both are read the same way, since all this
-     * looks for is the XML.
+     * Reads one request, answers 200, and passes the timeline on.
+     * A player may send its state as the request body or as a GET query;
+     * both are read the same way.
      */
     private fun serve(socket: Socket) {
         socket.soTimeout = READ_TIMEOUT_MS
         val text = socket.getInputStream().readBytes().decodeToString()
-        // Answer first: a player that doesn't hear 200 promptly gives up on
-        // the subscription, and parsing costs time it isn't waiting for.
+        // Answer first: a player that doesn't get 200 promptly gives up on the subscription.
         socket.getOutputStream().apply {
             write(RESPONSE.toByteArray())
             flush()

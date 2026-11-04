@@ -7,11 +7,7 @@ import kotlin.test.assertEquals
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
-/**
- * The parser is fed real container bytes rather than a mock: every case here
- * is a file laid out the way the format says, so a change that breaks a real
- * library breaks a test first.
- */
+/** Builds real container bytes instead of mocking, matching real file layouts. */
 class ReplayGainTagsTest {
 
     // --- builders -------------------------------------------------------------
@@ -53,8 +49,7 @@ class ReplayGainTagsTest {
     private fun flac(vararg entries: String): ByteArray {
         val out = ByteArrayOutputStream()
         out.write("fLaC".toByteArray())
-        // A STREAMINFO block first, as every real FLAC has, so the walk has to
-        // skip something before reaching the comments.
+        // Real FLAC files always have a STREAMINFO block before comments.
         val streamInfo = ByteArray(34)
         out.write(0x00); out.write(be32(streamInfo.size).copyOfRange(1, 4)); out.write(streamInfo)
         val comments = vorbisComments(*entries)

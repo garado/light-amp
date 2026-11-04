@@ -6,23 +6,18 @@ data class QueuedDownload(val sourceId: String, val track: Track) {
 }
 
 /**
- * What is waiting to be downloaded, in the order it will be fetched — and
- * nothing else. No I/O, no clock of its own, so the policy can be tested on
- * its own; [Downloader] owns the transfers and tells this what happened.
+ * What is waiting to be downloaded, in the order it will be fetched, and
+ * nothing else: no I/O, no clock of its own. [Downloader] owns the transfers
+ * and tells this what happened.
  *
  * Two lanes, drained in order: what the user asked for, then what a mode
- * decided to fetch on their behalf. Without the split, tapping Download on an
- * album while "Download everything" was working through a ten-thousand-track
- * library put that album ten thousand tracks back. A manual pick also
- * *promotes* a track already waiting in the automatic lane rather than
- * queueing it twice.
+ * decided to fetch on their behalf. A manual pick promotes a track already
+ * waiting in the automatic lane rather than queueing it twice.
  *
- * Entries are keyed by source *and* track: two servers can hand out the same
- * id for different music, and every source's downloads share this one queue
- * whichever of them is being browsed. [next] takes a predicate for that
- * reason — a source whose server has stopped answering, or whose library is
- * mid-sync, is skipped rather than parking everyone else's downloads behind
- * it.
+ * Entries are keyed by source and track, since two servers can hand out the
+ * same id for different music and every source shares this one queue. [next]
+ * takes a predicate so a source whose server is down or mid-sync is skipped
+ * rather than blocking everyone else.
  */
 class DownloadQueue {
 
@@ -34,17 +29,14 @@ class DownloadQueue {
     private val manualLane = LinkedHashMap<Key, QueuedDownload>()
     private val autoLane = LinkedHashMap<Key, QueuedDownload>()
 
-    /**
-     * Consecutive failures per entry, so one the server will never serve stops
-     * holding up everything behind it — see [fail]. Cleared by [complete].
-     */
+    /** Consecutive failures per entry; see [fail]. Cleared by [complete]. */
     private val strikes = HashMap<Key, Int>()
 
     val size: Int get() = manualLane.size + autoLane.size
 
     fun isEmpty(): Boolean = manualLane.isEmpty() && autoLane.isEmpty()
 
-    /** The sources with something waiting — for saying *why* nothing is moving. */
+    /** The sources with something waiting, for saying why nothing is moving. */
     fun sourceIds(): Set<String> =
         HashSet<String>().apply {
             manualLane.keys.forEach { add(it.sourceId) }
@@ -69,10 +61,9 @@ class DownloadQueue {
     }
 
     /**
-     * Take the next entry whose source [eligible] allows: the first such in the
-     * manual lane, else the first such in the automatic lane. Null when nothing
-     * qualifies — which, unless [isEmpty], means every waiting source is
-     * currently held back.
+     * Take the next entry whose source [eligible] allows: the first such in
+     * the manual lane, else the first such in the automatic lane. Null when
+     * nothing qualifies.
      */
     fun next(eligible: (sourceId: String) -> Boolean): Picked? {
         take(manualLane, eligible)?.let { return Picked(it, manual = true) }
@@ -95,15 +86,10 @@ class DownloadQueue {
     }
 
     /**
-     * The transfer failed. Back to the front of its own lane — an outage
-     * shouldn't cost a track the place it had earned — unless it keeps failing.
-     *
-     * A track the server can never serve, a file deleted since the last sync,
-     * went to the front every time and was picked again immediately, so nothing
-     * behind it ever ran. Measured 2026-09-03: one foreign id held 8,303
-     * downloads for as long as the app was open. After [FAILURES_BEFORE_BACK]
-     * tries it goes to the back instead. The outage case is unharmed —
-     * everything is failing, so everything moves and the relative order stays.
+     * The transfer failed. Goes back to the front of its own lane so a
+     * transient outage doesn't cost it its place, but after
+     * [FAILURES_BEFORE_BACK] tries it goes to the back instead, so a track
+     * the server can never serve stops blocking everything behind it.
      *
      * Returns true when it went to the back.
      */
@@ -121,10 +107,7 @@ class DownloadQueue {
         return toBack
     }
 
-    /**
-     * Put back at the front of its lane without a strike — for when the server
-     * couldn't be asked at all, which says nothing about the track.
-     */
+    /** Put back at the front of its lane without a strike, since nothing about the track is known to be wrong. */
     fun requeueFront(picked: Picked) {
         val lane = laneOf(picked)
         val rest = LinkedHashMap(lane)
@@ -151,11 +134,7 @@ class DownloadQueue {
     }
 
     companion object {
-        /**
-         * Failures an entry gets at the front of its lane before it is sent to
-         * the back. Three is enough to ride out a server restart without
-         * letting one bad id wedge the queue.
-         */
+        /** Failures at the front of its lane before an entry is sent to the back. */
         const val FAILURES_BEFORE_BACK = 3
     }
 }

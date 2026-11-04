@@ -4,11 +4,7 @@ import com.garado.amp.ui.components.indexLetterOf
 import kotlin.test.Test
 import kotlin.test.assertEquals
 
-/**
- * The sort key decides both list order and which A–Z bucket a row falls into, so
- * accented names landing in "#" was a single bug in two places. These pin the
- * folding down against the names that actually exposed it.
- */
+/** The sort key drives both list order and A-Z bucketing; accented names must fold to their base letter in both. */
 class LibrarySortTest {
 
     @Test

@@ -3,11 +3,7 @@ package com.garado.amp.data
 import kotlin.test.Test
 import kotlin.test.assertEquals
 
-/**
- * Splitting a multi-artist credit is one rule with two halves, and the second is
- * the one that bites: a semicolon separates two artists, a comma does not. These
- * pin both, including the names that make the comma rule non-negotiable.
- */
+/** A semicolon separates multiple album artists; a comma is part of a name, not a separator. */
 class AlbumArtistCreditTest {
 
     private fun track(albumArtist: String, artist: String = "Performer") = Track(

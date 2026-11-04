@@ -6,11 +6,7 @@ import kotlin.test.assertFalse
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
-/**
- * The order downloads are fetched in, and where a failed one goes back to.
- * Every source's downloads share one queue, so most of these are about two
- * sources sharing it without getting in each other's way.
- */
+/** All sources share one download queue. */
 class DownloadQueueTest {
 
     private fun track(id: String) = Track(
@@ -75,7 +71,7 @@ class DownloadQueueTest {
         q.add(entry("plex", "p2"), manual = false)
         val picked = q.next { it != "plex" }
         assertEquals("n1", picked?.entry?.track?.id)
-        // Nothing else qualifies, but the queue is not empty — the caller waits.
+        // Null does not mean empty; the caller waits for an eligible source.
         assertNull(q.next { it != "plex" })
         assertFalse(q.isEmpty())
         assertEquals(setOf("plex"), q.sourceIds())
@@ -139,7 +135,7 @@ class DownloadQueueTest {
         q.add(entry("a", "auto"), manual = false)
         val hand = q.next(all)!!
         q.fail(hand)
-        // Still ahead of the automatic lane — it went back to the manual one.
+        // Still ahead of the automatic lane, since it went back to the manual one.
         assertEquals("hand", q.next(all)?.entry?.track?.id)
     }
 

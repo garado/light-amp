@@ -4,12 +4,9 @@ import java.text.Normalizer
 import kotlin.random.Random
 
 /**
- * List ordering for the library tabs.
- *
- * Each sort key has a "natural" direction — names read A→Z, dates and play counts
- * read newest/most first — and the persisted `reversed` flag flips it. That way
- * re-tapping the selected option in the sort menu always visibly inverts the
- * list, whichever key it is.
+ * List ordering for the library tabs. Each sort key has a "natural"
+ * direction (names A-Z, dates and play counts newest/most first), and the
+ * persisted `reversed` flag flips it.
  */
 val AlbumSort.descendingByNature: Boolean
     get() = when (this) {
@@ -38,17 +35,15 @@ val PlaylistSort.descendingByNature: Boolean
     }
 
 /**
- * Leading articles ignored when sorting names, so "The Beatles" files under B.
- * Matches Navidrome's own `IgnoredArticles` default, keeping the app's ordering
- * consistent with the server's.
+ * Leading articles ignored when sorting names, so "The Beatles" files under
+ * B. Matches Navidrome's own `IgnoredArticles` default.
  */
 private val IGNORED_ARTICLES = listOf("the", "el", "la", "los", "las", "le", "les")
 
 /**
- * Latin letters that carry no Unicode decomposition, so NFD can't fold them —
- * a stroked or ligature letter is one codepoint with no combining mark to strip.
- * Without this, "Ólafur" folds fine but "Øystein" or "Æther" would still sort
- * past Z and land in the index's "#" bucket.
+ * Latin letters with no Unicode decomposition, so NFD alone can't fold
+ * them. Without this, a name like "Øystein" would sort past Z into the
+ * index's "#" bucket.
  */
 private val FOLD_EXTRAS = mapOf(
     'ø' to "o", 'œ' to "oe", 'æ' to "ae", 'ß' to "ss", 'ł' to "l", 'đ' to "d",
@@ -60,18 +55,13 @@ private val COMBINING_MARKS = Regex("\\p{Mn}+")
 
 /**
  * Case-insensitive sort key with accents folded onto their base letter, so
- * "Ólafur Arnalds" files under O and "Éthiopiques" under E rather than sorting
- * past Z. Decomposing to NFD and dropping the combining marks handles the bulk
- * of it; [FOLD_EXTRAS] covers the letters that don't decompose.
- *
- * Non-Latin scripts are deliberately left alone — they have no sensible A–Z
- * home and belong in the "#" bucket.
+ * "Ólafur Arnalds" files under O rather than sorting past Z. [FOLD_EXTRAS]
+ * covers the letters NFD decomposition can't fold. Non-Latin scripts are
+ * left alone; they belong in the "#" bucket.
  */
 fun titleKey(name: String): String {
     val lower = name.trim().lowercase()
-    // Fast path: nothing outside ASCII can need folding, and almost every title is
-    // plain ASCII. Skipping the normaliser and the regex here matters because this
-    // sits under the library sorts.
+    // Fast path: almost every title is plain ASCII, which never needs folding.
     if (lower.all { it.code < 0x80 }) return lower
     val decomposed = Normalizer.normalize(lower, Normalizer.Form.NFD)
     val stripped = COMBINING_MARKS.replace(decomposed, "")
@@ -82,12 +72,8 @@ fun titleKey(name: String): String {
 }
 
 /**
- * A sort key that files anything not starting with a letter at the end.
- *
- * Lexicographically, digits and punctuation come *before* letters — so "2112"
- * and "[Led Zeppelin IV]" opened every list, while the A–Z strip puts "#" after
- * Z and a tap on it jumped backwards. This prefixes the bucket, so the list
- * agrees with the strip beside it.
+ * A sort key that files anything not starting with a letter at the end,
+ * agreeing with the A-Z index strip, which puts "#" after Z.
  */
 fun nameKey(name: String): String = bucketed(titleKey(name))
 
@@ -113,12 +99,9 @@ fun sortName(name: String): String {
 
 
 /**
- * Sort by a key computed **once per element**.
- *
- * `sortedBy { }` evaluates its selector inside the comparator, so an O(n log n)
- * sort calls it hundreds of thousands of times on a library this size. With
- * [titleKey] — Unicode normalisation plus a regex — that was enough to hang the
- * main thread and trip "Amp isn't responding". Decorating first makes it n.
+ * Sort by a key computed once per element. `sortedBy { }` evaluates its
+ * selector inside the comparator, calling it O(n log n) times; decorating
+ * first makes it O(n), which matters with [titleKey]'s Unicode normalization.
  */
 private inline fun <T, K : Comparable<K>> List<T>.sortedByKeyOnce(
     selector: (T) -> K,
@@ -137,11 +120,9 @@ private inline fun <T> List<T>.sortedByKeysOnce(
 
 
 /**
- * Descending numeric key, ties broken by a string key — both computed once.
- *
- * The tie-breaker matters more than it looks: sorting by play count or date added
- * leaves most pairs tied (nearly everything has zero plays), so a `thenBy { }`
- * lambda ends up running on almost every comparison rather than rarely.
+ * Descending numeric key, ties broken by a string key, both computed once.
+ * The tie-breaker runs on almost every comparison here, since most albums
+ * tie on plays or date added, so it's worth computing once rather than per comparison.
  */
 private inline fun <T> List<T>.sortedByDescendingThenKey(
     crossinline primary: (T) -> Long,
@@ -154,7 +135,7 @@ fun sortAlbums(
     albums: List<Album>,
     sort: AlbumSort,
     reversed: Boolean = false,
-    /** Re-deals Random when bumped — see AppSettings.shuffleNonce. */
+    /** Re-deals Random when bumped; see AppSettings.shuffleNonce. */
     shuffleNonce: Int = 0,
 ): List<Album> {
     val ordered = when (sort) {
@@ -187,10 +168,10 @@ fun sortAlbums(
             primary = { it.rating.toLong() },
             key = { nameKey(it.title) },
         )
-        // Shuffled by a seed that only changes when the library does — or when
-        // the user re-taps Random for a new deal (the nonce). Stable otherwise,
-        // because a fresh shuffle on every recomposition would move rows under
-        // a scrolling finger.
+        // Shuffled by a seed that only changes when the library does, or
+        // when the user re-taps Random (the nonce). Stable otherwise, so a
+        // fresh shuffle on every recomposition doesn't move rows under a
+        // scrolling finger.
         AlbumSort.RANDOM -> albums.shuffled(
             Random(
                 albums.size.toLong() * 31 +

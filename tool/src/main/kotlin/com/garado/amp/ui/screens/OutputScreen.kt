@@ -52,16 +52,13 @@ import kotlin.math.roundToInt
 /**
  * Output + volume sheet reached from the Now Playing transport.
  *
- * The volume fader drives the phone's own media volume. Speaker-vs-Bluetooth
- * routing is LightOS's job (a tool has no access to the audio-routing APIs), so
- * that part of the list is informational. Network speakers found over DLNA *can*
- * be switched to — see the temporary cast support in `DlnaCast` — and so can
- * other Plex players (an Apple TV's Plex app, say) when the active source is
- * Plex, over Plex's own Companion protocol.
+ * The volume fader drives the phone's media volume. Speaker-vs-Bluetooth
+ * routing is LightOS's job; this list is informational for that part. Network
+ * speakers over DLNA and other Plex players can be switched to directly.
  */
 class OutputScreen(sealed: SealedLightActivity) : SimpleLightScreen<Unit>(sealed) {
 
-    // While casting, the rocker belongs to the speaker — see handleVolumeKey.
+    // While casting, the rocker belongs to the speaker. See handleVolumeKey.
     override fun onKeyDown(keyCode: Int, event: KeyEvent): Boolean =
         App.playback.handleVolumeKey(keyCode) || super.onKeyDown(keyCode, event)
 
@@ -75,10 +72,9 @@ class OutputScreen(sealed: SealedLightActivity) : SimpleLightScreen<Unit>(sealed
         var plexPlayers by remember { mutableStateOf<List<PlexPlayer>>(emptyList()) }
         var scanning by remember { mutableStateOf(true) }
 
-        // Discovery is a few seconds of UDP waiting, so it runs once on open and
-        // is repeatable from the Scan row rather than on every recomposition.
-        // The Plex ask is one HTTP round trip, so it goes first and its players
-        // appear while the UDP wait is still on.
+        // DLNA discovery is a few seconds of UDP waiting, so it runs once on open,
+        // repeatable from the Scan row. The Plex HTTP check goes first, so its
+        // players appear while the UDP wait is still running.
         var scanToken by remember { mutableStateOf(0) }
         LaunchedEffect(scanToken) {
             scanning = true
@@ -87,10 +83,9 @@ class OutputScreen(sealed: SealedLightActivity) : SimpleLightScreen<Unit>(sealed
             scanning = false
         }
 
-        // A fader with nothing to move: an Apple TV feeding a receiver reports
-        // a volume it doesn't own, takes the command and changes nothing. Once
-        // that is established the control is disabled rather than left to lie.
-        // Dimmed rather than hidden, so the page doesn't jump.
+        // Some Plex players (e.g. an Apple TV feeding a receiver) report a volume
+        // they don't actually own. Disabled rather than left to lie, dimmed
+        // rather than hidden so the page doesn't jump.
         val faderLive = plexCasting == null ||
             plexVolume != PlaybackController.PlexVolume.NotOurs
 
@@ -135,7 +130,7 @@ class OutputScreen(sealed: SealedLightActivity) : SimpleLightScreen<Unit>(sealed
                         OutputRow(AppIcons.Bluetooth, "Bluetooth", selected = false, enabled = false)
                     }
 
-                    item { SectionLabel(if (scanning) "Network — searching…" else "Network") }
+                    item { SectionLabel(if (scanning) "Network - searching…" else "Network") }
                     items(renderers, key = { it.id }) { renderer ->
                         OutputRow(
                             icon = AppIcons.Cast,
@@ -182,7 +177,7 @@ class OutputScreen(sealed: SealedLightActivity) : SimpleLightScreen<Unit>(sealed
                     item {
                         AppText(
                             "Bluetooth speakers and headphones play automatically when they're " +
-                                "paired — Light handles that routing, so it can't be switched here.",
+                                "paired - Light handles that routing, so it can't be switched here.",
                             pxSp(LightType.DETAIL_PX),
                             lineHeight = pxSp(LightType.DETAIL_LINE_PX),
                             dim = true,
@@ -206,8 +201,7 @@ class OutputScreen(sealed: SealedLightActivity) : SimpleLightScreen<Unit>(sealed
                 modifier = Modifier
                     .weight(1f)
                     .height(px(71))
-                    // Not merely dimmed: a control that can't do anything
-                    // shouldn't move under the thumb either.
+                    // A disabled control shouldn't move under the thumb either.
                     .pointerInput(enabled) {
                         if (!enabled) return@pointerInput
                         awaitEachGesture {
@@ -242,8 +236,6 @@ class OutputScreen(sealed: SealedLightActivity) : SimpleLightScreen<Unit>(sealed
         enabled: Boolean = true,
         onClick: (() -> Unit)? = null,
     ) {
-        // The same row every other menu draws, with the route's glyph in
-        // front of it — one component, not a rendering of its own.
         TextRow(
             title = label,
             leading = {

@@ -3,32 +3,12 @@ package com.garado.amp.data
 import java.io.File
 
 /**
- * Writes the index a streaming MP3 encoder cannot.
+ * Adds a Xing VBR header to MP3s encoded without one (e.g. Plex's live
+ * segmented transcode output), so players can read correct duration and seek
+ * positions instead of guessing from the first frame's bitrate.
  *
- * A variable-rate MP3 says nothing about its own length unless something
- * writes it down: a "Xing" frame at the front, holding the number of frames
- * and, at each percent of the way through, how far into the file that is.
- * LAME writes it *last*, seeking back to the start once it knows the total.
- * An encoder writing to a stream has nowhere to seek back to, and Plex's
- * transcoder produces every mp3 as a live segmented encode — so the frames
- * arrive, and nothing else.
- *
- * Without that frame every player is left to guess. ExoPlayer divides the
- * file size by the *first* frame's bitrate, which on a variable-rate encode
- * is wrong by however quiet that frame happened to be: a 3:07 song read as
- * 22:57, the player grinding on through a phantom remainder in silence, and
- * every seek landing somewhere other than where the bar said. Three symptoms
- * of one missing frame.
- *
- * This is the encoder's last step, done by the one party that has the whole
- * file. Walk the frames, count them, note where each percent begins, and put
- * the frame LAME would have written in front. Not one audio byte moves. What
- * results is what any decoder expects an MP3 to be — this app's player, a car
- * stereo, `vbrfix` twenty years ago, all read it the same way. A file that
- * already carries an index is recognised from its first frame and left alone.
- *
- * Layer III only; the tables are the MPEG audio frame header as ExoPlayer's
- * MpegAudioUtil reads it and LAME's VbrTag.c writes it.
+ * Layer III only. A file that already carries a Xing, Info, or VBRI frame is
+ * left untouched.
  */
 object Mp3VbrIndex {
 
@@ -39,7 +19,7 @@ object Mp3VbrIndex {
         /** Already carries a Xing, Info or VBRI frame; left exactly as it was. */
         data object AlreadyIndexed : Outcome
 
-        /** No Layer III frame at the start — not something to touch. */
+        /** No Layer III frame at the start. Not something to touch. */
         data object NotMpegAudio : Outcome
 
         /** The frames stop short of the end, so any count would be a lie. */
@@ -47,13 +27,12 @@ object Mp3VbrIndex {
     }
 
     /**
-     * Index [file] in place.
+     * Indexes [file] in place.
      *
-     * An indexed file is recognised from its opening frame alone, so the
-     * launch-time pass over a whole library reads a few kilobytes per file
-     * rather than the files. Only one that needs the work is read whole.
-     * Written through a temporary file and renamed, so an interruption leaves
-     * the original as it was rather than half-rewritten.
+     * Reads only a few kilobytes to check whether a file is already indexed;
+     * reads the full file only when indexing is actually needed. Writes
+     * through a temporary file and renames, so an interruption can't leave the
+     * file half-written.
      */
     fun index(file: File): Outcome {
         val head = readHead(file, PROBE_BYTES)
@@ -70,8 +49,6 @@ object Mp3VbrIndex {
         val index = buildIndexFrame(first, walk)
         val out = File(file.parentFile, file.name + INDEXING_SUFFIX)
         out.outputStream().buffered().use { o ->
-            // The ID3v2 tag, if there is one, verbatim; then the index; then
-            // every frame and whatever followed them, verbatim.
             o.write(data, 0, fullTagEnd)
             o.write(index)
             o.write(data, first, data.size - first)
@@ -125,9 +102,9 @@ object Mp3VbrIndex {
     }
 
     /**
-     * Where the audio begins. A lone sync word turns up inside audio data
-     * often enough; a second frame starting exactly where the first says it
-     * ends does not, and that is what counts as finding the stream.
+     * Where the audio stream begins. A single matching sync word isn't proof;
+     * this requires a second valid frame starting exactly where the first
+     * one's length says it should.
      */
     private fun firstFrame(data: ByteArray, from: Int): Int? {
         val limit = minOf(data.size - 4, from + SYNC_SCAN_BYTES)
@@ -164,11 +141,8 @@ object Mp3VbrIndex {
             at = next
         }
         if (offsets.isEmpty()) return null
-        // What follows the last frame has to be nothing, an ID3v1 tag, or the
-        // stub of a frame cut off by the end of the file. Anything else means
-        // the walk lost the stream part-way, and an index built on part of a
-        // file would recreate the very bug this exists to fix, with a shorter
-        // phantom. Better to leave it as it came.
+        // Trailing data must be empty, an ID3v1 tag, or a truncated frame.
+        // Anything else means the walk lost the stream, so skip indexing.
         val rest = data.size - at
         val clean = rest < 4 ||
             (rest == ID3V1_BYTES && tagAt(data, at, "TAG")) ||
@@ -179,12 +153,10 @@ object Mp3VbrIndex {
     // --- The index frame -----------------------------------------------------
 
     /**
-     * The frame LAME would have written: the first frame's own header, at the
-     * smallest standard bitrate whose frame can hold the index, padding off and
-     * no CRC; then side information left zero; then the tag, the flags, the
-     * frame count, the byte count, and a hundred positions. Offsets are from
-     * the start of this frame, as a fraction of [Outcome.Written.bytes], which
-     * is how every reader of a Xing frame interprets them.
+     * Builds the Xing frame: header matching the first frame at the smallest
+     * bitrate that can hold the index, then the tag, flags, frame count, byte
+     * count, and TOC. TOC offsets are fractions of [Outcome.Written.bytes],
+     * as Xing readers expect.
      */
     private fun buildIndexFrame(first: Int, walk: Walk): ByteArray {
         val h = walk.head

@@ -54,11 +54,9 @@ data class AlbumEntity(
     val releaseDate: Long,
     val createdMs: Long,
     /**
-     * The server's own last-changed stamp; see [Album.updatedMs].
-     *
-     * The SQL default is what lets this arrive as an auto-migration: rows
-     * written before it existed read 0, which the sync filter treats as
-     * "never heard a stamp for this one" and re-fetches once.
+     * The server's own last-changed stamp; see [Album.updatedMs]. Rows
+     * written before this column existed read 0, which the sync filter
+     * treats as "no stamp" and re-fetches once.
      */
     @ColumnInfo(defaultValue = "0")
     val updatedMs: Long = 0,
@@ -69,33 +67,25 @@ data class AlbumEntity(
     val rating: Int = 0,
     val genre: String = "",
     /**
-     * Which of the server's libraries this album came from — a Subsonic music
-     * folder, or null where the server has only one (or the row predates this).
-     *
-     * Recorded so switching library is a filter over the cache rather than a
-     * fetch. It used to be clear-and-re-sync, which cannot work with no server
-     * to sync from: offline, the switch emptied the library and left it empty
-     * while the downloaded files sat on disk. See LibraryRepository.allAlbums.
+     * Which of the server's libraries this album came from (a Subsonic music
+     * folder), or null when the server has only one. Recorded so switching
+     * library filters the cache instead of requiring a fetch; see
+     * LibraryRepository.allAlbums.
      */
     val libraryId: String? = null,
 )
 
 /**
- * Liked artists, stored by name. The Artists list is derived from track tags
- * rather than fetched, so a name is the only stable key we can join on; the
- * server's own artist ids are resolved on demand when starring.
+ * Liked artists, stored by name, since the Artists list is derived from
+ * track tags rather than fetched and has no stable id to join on otherwise.
  */
 @Entity(tableName = "liked_artists")
 data class LikedArtistEntity(@PrimaryKey val name: String)
 
 /**
  * One entry of an artist's popular-songs list, as the server ranked it.
- *
- * Ids only — the tracks themselves are library rows, and a popular song that
- * isn't in the cached library is left out when read back rather than written
- * in: rows from outside the library are how one server's songs once ended up
- * in another's. Kept per source with the rest of its cache, and refreshed
- * quietly once [fetchedAtMs] is old — see LibraryRepository.topSongsForArtist.
+ * Stores track ids only; a popular song missing from the cached library is
+ * dropped on read rather than written in. See LibraryRepository.topSongsForArtist.
  */
 @Entity(tableName = "top_songs", primaryKeys = ["artist", "position"])
 data class TopSongEntity(
@@ -106,9 +96,9 @@ data class TopSongEntity(
 )
 
 /**
- * One downloaded track. The audio lives on disk under the tool's files dir; this
- * row is the index over it (what format it's in, how big it is, and any lyrics
- * captured alongside so offline playback can still show them).
+ * One downloaded track. The audio lives on disk under the tool's files dir;
+ * this row indexes it (format, size, and any lyrics captured for offline
+ * playback).
  */
 @Entity(tableName = "downloads")
 data class DownloadEntity(
@@ -121,7 +111,7 @@ data class DownloadEntity(
     val downloadedAtMs: Long,
 )
 
-/** A downloaded file, without the lyrics blob — see [LibraryDao.observeDownloads]. */
+/** A downloaded file, without the lyrics blob; see [LibraryDao.observeDownloads]. */
 data class DownloadFile(
     val trackId: String,
     val albumId: String?,
@@ -142,17 +132,9 @@ data class AlbumTrackCount(val albumId: String, val tracks: Int)
 interface LibraryDao {
 
     /**
-     * The whole table, and the reason these carry [Transaction].
-     *
-     * A result this size doesn't fit one CursorWindow, so reading it means
-     * several fills — and each fill is its own snapshot unless something holds
-     * them together. A sync writing underneath between two of them throws
-     * "Couldn't read row N from CursorWindow" and takes the app down; switching
-     * source is the reliable way to see it, because that starts a full read and
-     * a full sync at the same moment. Making each write atomic (see
-     * [replaceAlbumTracks]) narrowed the window without closing it. A read
-     * transaction closes it: the whole list comes from one snapshot, and in WAL
-     * mode it doesn't hold writers up to get it.
+     * The whole table. Carries [Transaction] because a result this size
+     * doesn't fit one CursorWindow: without a read transaction, a write
+     * landing between fills throws "Couldn't read row N from CursorWindow".
      */
     @Transaction
     @Query("SELECT * FROM tracks")
@@ -167,9 +149,8 @@ interface LibraryDao {
     suspend fun allAlbumsSnapshot(): List<AlbumEntity>
 
     /**
-     * The whole table, once — for the download top-up, which reads every
-     * source's tables rather than only the one being observed. Same read
-     * transaction as [observeTracks], for the same CursorWindow reason.
+     * The whole table, once, for the download top-up, which reads every
+     * source's tables rather than only the one being observed.
      */
     @Transaction
     @Query("SELECT * FROM tracks")
@@ -181,15 +162,7 @@ interface LibraryDao {
     @Query("DELETE FROM tracks WHERE albumId = :albumId")
     suspend fun deleteTracksForAlbum(albumId: String)
 
-    /**
-     * Tracks belonging to no album this library holds.
-     *
-     * Pruning walks the albums it knows about, so a track whose album row was
-     * never written is invisible to it — and stays for good, because every later
-     * sync asks the same album-shaped question. That is what a cross-source
-     * write leaves behind: another server's songs, with none of its albums, in a
-     * library that has no idea they are there.
-     */
+    /** Tracks belonging to no album this library holds. */
     @Query("SELECT COUNT(*) FROM tracks WHERE albumId IS NOT NULL AND albumId NOT IN (SELECT id FROM albums)")
     suspend fun orphanedTrackCount(): Int
 
@@ -206,14 +179,9 @@ interface LibraryDao {
     suspend fun upsertTracks(tracks: List<TrackEntity>)
 
     /**
-     * Replace the tracks of several albums in one transaction.
-     *
-     * A sync that deletes and re-inserts album by album invalidates the tracks
-     * table twice per album, and every invalidation re-runs the observers' full
-     * `SELECT * FROM tracks`. At eight thousand rows that cursor pages its window,
-     * and rows shifting underneath it between fills throws "Couldn't read row N
-     * from CursorWindow". Batching cuts the invalidations by the batch size and
-     * keeps each swap atomic.
+     * Replace the tracks of several albums in one transaction. Batches the
+     * delete-and-reinsert so a large sync doesn't invalidate (and re-run)
+     * every observer's `SELECT * FROM tracks` once per album.
      */
     @Transaction
     suspend fun replaceAlbumTracks(albumIds: List<String>, tracks: List<TrackEntity>) {
@@ -228,12 +196,8 @@ interface LibraryDao {
     suspend fun deleteAlbums(ids: List<String>)
 
     /**
-     * Swap the whole set of liked tracks in one go.
-     *
-     * Clearing and re-liking as two writes leaves a moment where nothing is
-     * liked, and every observer sees it: open Liked Songs while a sync is
-     * passing through that gap and the page reads "No liked songs" for a beat
-     * before the list comes back. One transaction, one invalidation, no gap.
+     * Swap the whole set of liked tracks in one transaction, so observers
+     * never see a moment where nothing is liked.
      */
     @Transaction
     suspend fun replaceTrackLikes(ids: List<String>) {
@@ -241,7 +205,7 @@ interface LibraryDao {
         if (ids.isNotEmpty()) likeTracks(ids)
     }
 
-    /** The same for artists, which the sync rewrites the same way. */
+    /** The same for artists. */
     @Transaction
     suspend fun replaceLikedArtists(artists: List<LikedArtistEntity>) {
         clearLikedArtists()
@@ -271,7 +235,7 @@ interface LibraryDao {
     @Query("SELECT name FROM liked_artists")
     fun observeLikedArtists(): Flow<List<String>>
 
-    /** The same, once — see [allTracksSnapshot]. */
+    /** The same, once; see [allTracksSnapshot]. */
     @Query("SELECT name FROM liked_artists")
     suspend fun likedArtistNames(): List<String>
 
@@ -319,12 +283,9 @@ interface LibraryDao {
     suspend fun allCoverArtIds(): List<String>
 
     /**
-     * Point every track at its album's cover, once.
-     *
-     * Rows synced before the clients did this themselves carry a cover id of
-     * their own — Navidrome's per-file `mf-` ids, Jellyfin's per-track images —
-     * and every one was a separate copy of the same sleeve on disk. Idempotent
-     * and cheap, so it simply runs at each launch; see App.boot.
+     * Point every track at its album's cover, collapsing per-track cover ids
+     * (Navidrome's `mf-` ids, Jellyfin's per-track images) into one shared
+     * copy. Idempotent; runs at each launch, see App.boot.
      */
     @Query(
         "UPDATE tracks SET coverArtId = (SELECT a.coverArtId FROM albums a WHERE a.id = tracks.albumId) " +
@@ -334,14 +295,14 @@ interface LibraryDao {
     )
     suspend fun collapseTrackCovers(): Int
 
-    /** The covers of downloaded songs — the sleeves an offline library needs. */
+    /** The covers of downloaded songs, needed by an offline library. */
     @Query(
         "SELECT DISTINCT t.coverArtId FROM tracks t JOIN downloads d ON d.trackId = t.id " +
             "WHERE t.coverArtId IS NOT NULL",
     )
     suspend fun downloadedCoverArtIds(): List<String>
 
-    /** Albums with no library recorded — see LibraryRepository's retag pass. */
+    /** Albums with no library recorded; see LibraryRepository's retag pass. */
     @Query("SELECT COUNT(*) FROM albums WHERE libraryId IS NULL")
     suspend fun untaggedAlbumCount(): Int
 
@@ -357,14 +318,10 @@ interface LibraryDao {
     suspend fun trackCountsByAlbum(): List<AlbumTrackCount>
 
     /**
-     * The one observed read of this table — see [LibraryRepository.downloadFiles],
-     * which shares it out to everything derived from downloads.
-     *
-     * A projection, not `SELECT *`: the lyrics column holds a whole song's text,
-     * and selecting it for every row pushes the query past the 2MB CursorWindow,
-     * where Room fails mid-read with "Couldn't read row N" — which is what
-     * deleting a download used to crash on. Nothing observing this needs the
-     * words; [download] fetches them one row at a time.
+     * The one observed read of this table; see [LibraryRepository.downloadFiles].
+     * Projects out the `lyrics` column deliberately: selecting it for every
+     * row risks exceeding the 2MB CursorWindow. [download] fetches lyrics one
+     * row at a time instead.
      */
     @Transaction
     @Query("SELECT trackId, albumId, fileName, format, bytes, downloadedAtMs FROM downloads")
@@ -373,12 +330,7 @@ interface LibraryDao {
     @Query("SELECT * FROM downloads WHERE trackId = :trackId")
     suspend fun download(trackId: String): DownloadEntity?
 
-    /**
-     * Downloads with no words stored — see [Downloader.refillMissingLyrics].
-     *
-     * Ids only, deliberately: selecting the lyrics column across every row is
-     * exactly what blows the CursorWindow, as the projection above explains.
-     */
+    /** Downloads with no words stored; see [Downloader.refillMissingLyrics]. Ids only, same reason as above. */
     @Query("SELECT trackId FROM downloads WHERE lyrics IS NULL LIMIT :limit")
     suspend fun downloadsMissingLyrics(limit: Int): List<String>
 
@@ -398,13 +350,9 @@ interface LibraryDao {
     suspend fun clearDownloads()
 
     /**
-     * Give downloads back the album they belong to.
-     *
-     * A schema bump drops every table, and the index is then rebuilt from the
-     * files on disk — which carry a track id in their name and nothing else. Rows
-     * reindexed that way have no albumId, so the "whole album downloaded" mark
-     * vanished from every album list until each track was fetched again. This
-     * puts it back from the library as soon as there is a library to ask.
+     * Give downloads back the album they belong to. Files reindexed from disk
+     * after a schema bump carry only a track id, so this backfills albumId
+     * from the library once one exists.
      */
     @Query(
         "UPDATE downloads SET albumId = " +
@@ -419,10 +367,7 @@ interface LibraryDao {
     @Query("UPDATE albums SET rating = :stars WHERE id = :id")
     suspend fun setAlbumRating(id: String, stars: Int)
 
-    /**
-     * Record a play locally, so Recently Played and Most Played move as you
-     * listen rather than at the next sync.
-     */
+    /** Record a play locally, so Recently Played and Most Played update immediately. */
     @Query("UPDATE tracks SET playCount = playCount + 1, lastPlayedMs = :atMs WHERE id = :id")
     suspend fun markPlayed(id: String, atMs: Long)
 }
@@ -437,9 +382,8 @@ interface LibraryDao {
     ],
     version = 12,
     exportSchema = true,
-    // Generated from the committed schemas (tool/schemas), so existing installs
-    // keep their libraries and downloads across the bump. Every schema change
-    // from here on should add a step here rather than lean on the SDK's
+    // Every schema change should add a migration step here, generated from
+    // the committed schemas in tool/schemas, rather than rely on the SDK's
     // drop-everything fallback.
     autoMigrations = [
         AutoMigration(from = 9, to = 10),

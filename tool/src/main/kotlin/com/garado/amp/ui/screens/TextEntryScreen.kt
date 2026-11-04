@@ -23,7 +23,7 @@ class TextEntryScreen(
     private val submitIcon: LightIconConfiguration? = null,
 ) : SimpleLightScreen<String?>(sealed) {
 
-    // While casting, the rocker belongs to the speaker — see handleVolumeKey.
+    // While casting, the rocker belongs to the speaker, see handleVolumeKey.
     override fun onKeyDown(keyCode: Int, event: KeyEvent): Boolean =
         App.playback.handleVolumeKey(keyCode) || super.onKeyDown(keyCode, event)
 

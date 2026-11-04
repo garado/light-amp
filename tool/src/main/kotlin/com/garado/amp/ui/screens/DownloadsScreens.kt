@@ -66,37 +66,24 @@ fun dataModeLabel(mode: DataMode): String = when (mode) {
 private const val MODE_DETAIL_LINES = 2
 
 private fun dataModeDetail(mode: DataMode): String = when (mode) {
-    DataMode.MAKE_IT_HURT -> "No limits — streaming, downloads and artwork all use cellular data when there's no Wi-Fi"
+    DataMode.MAKE_IT_HURT -> "No limits - streaming, downloads and artwork all use cellular data when there's no Wi-Fi"
     DataMode.LOW_DATA -> "Streams music on cellular data, but downloads and artwork wait for Wi-Fi"
     DataMode.WIFI_ONLY -> "Never uses cellular data. Without Wi-Fi, only your downloads play"
 }
 
 /** Everything the user has downloaded, newest first. */
 class DownloadsScreen(sealed: SealedLightActivity) : SimpleLightScreen<Unit>(sealed) {
-    // While casting, the rocker belongs to the speaker — see handleVolumeKey.
+    // While casting, the rocker belongs to the speaker. See handleVolumeKey.
     override fun onKeyDown(keyCode: Int, event: KeyEvent): Boolean =
         App.playback.handleVolumeKey(keyCode) || super.onKeyDown(keyCode, event)
 
     @Composable
     override fun Content() {
-        // Every source's downloads, not the active one's — see
-        // App.downloadsBySource. Read again each time a download lands, which
-        // is what makes a song appear here while you are watching it happen;
-        // it used to be read once when the page opened and then sat still, so
-        // a download finishing was invisible until you left and came back.
-        //
-        // Keyed on the downloader's count of completed transfers rather than
-        // observing every source: this read reaches into databases the app is
-        // not otherwise holding open, and this way it opens them for a moment
-        // instead of holding all of them open for as long as the page is up.
-        // The count covers every source, since downloads run for all of them
-        // whichever is being browsed; the active source's set is watched too,
-        // for a download removed from a library screen.
+        // Every source's downloads, not just the active one. See App.downloadsBySource.
         val downloadedIds by App.library.downloadedTrackIds.collectAsState()
         val progress by App.downloader.progress.collectAsState()
         var bySource by remember { mutableStateOf<List<Pair<String, List<Track>>>>(emptyList()) }
-        // The song lists' own order, chosen from the header — this page used to
-        // be stuck with whatever order the store handed back.
+        // Sort order comes from the header, same as the song lists. See App.songSort.
         val sort by App.songSort.collectAsState()
         val reversed by App.songSortReversed.collectAsState()
         val sorted = remember(bySource, sort, reversed) {
@@ -104,15 +91,10 @@ class DownloadsScreen(sealed: SealedLightActivity) : SimpleLightScreen<Unit>(sea
         }
         val total = remember(sorted) { sorted.sumOf { it.second.size } }
         val named = sorted.size > 1
-        // Across every source, off the disk: this page is about what the phone
-        // is holding, and the budget it is measured against covers all of it.
-        // Read alongside the lists, so the figure and the songs it counts can
-        // never disagree.
+        // Bytes used across every source, not just the active one.
         var bytes by remember { mutableStateOf(0L) }
         LaunchedEffect(downloadedIds, progress.completed) {
-            // Both of these touch the disk, and neither belongs on the frame
-            // this page is drawn on. A change arriving mid-read cancels it and
-            // starts again, so the newest answer is the one that lands.
+            // Disk reads; keep them off the composition thread.
             val read = withContext(Dispatchers.IO) {
                 App.downloadsBySource() to App.downloads.usedBytesEverywhere()
             }
@@ -123,16 +105,9 @@ class DownloadsScreen(sealed: SealedLightActivity) : SimpleLightScreen<Unit>(sea
             initial = AppSettings.DEFAULT_DOWNLOAD_LIMIT,
         )
         val paused by App.settings.downloadsPaused.collectAsState(initial = false)
-        // Named only with more than one server to download from — with one,
-        // the name would repeat the obvious.
         val sources by App.settings.sources.collectAsState(initial = emptyList())
         val severalServers = sources.count { it.supportsDownloads } > 1
 
-        // No tab bar and no menu: this is reached from Settings, and it is a
-        // page about storage rather than a way of browsing the library. Back
-        // returns to the settings it was opened from, which is the only route
-        // in. Its order still follows the song lists' — see App.songSort — it
-        // simply isn't set from here any more.
         PlayerTheme {
             Column(modifier = Modifier.fillMaxSize()) {
             AppHeader(
@@ -141,8 +116,6 @@ class DownloadsScreen(sealed: SealedLightActivity) : SimpleLightScreen<Unit>(sea
                 fitTitle = true,
             )
             if (total == 0 && !progress.active && bytes == 0L) {
-                // Says how, not just that: the one user who came looking here
-                // had no way to learn that holding a row is the way in.
                 EmptyState("Nothing downloaded yet.\nHold a song, album or artist and choose Download.")
                 return@Column
             }
@@ -152,9 +125,8 @@ class DownloadsScreen(sealed: SealedLightActivity) : SimpleLightScreen<Unit>(sea
             ) {
                 if (progress.active || paused) {
                     item {
-                        // Separate from pause: one stops for now, the other throws
-                        // away a queue that can take an hour to rebuild, and they
-                        // should never be the same tap.
+                        // Cancel clears the queue; pause (below) just stops for now.
+                        // Rebuilding a cleared queue can take an hour.
                         TextRow(
                             title = "Cancel Downloads",
                             subtitle = "Clears what's still queued",
@@ -163,16 +135,9 @@ class DownloadsScreen(sealed: SealedLightActivity) : SimpleLightScreen<Unit>(sea
                         )
                     }
                     item {
-                        // Pause rather than cancel: the X threw away a queue that
-                        // takes an hour to rebuild, and "stop for now" is what
-                        // anyone actually wants from a running download.
                         TextRow(
-                            // The track, not a position in the batch: the batch is
-                            // the whole library and the size limit stops it long
-                            // before the end, so "N of 10105" told the user nothing.
                             title = progress.currentTitle ?: "Downloading",
-                            // Whose music is moving, when that isn't obvious:
-                            // every server's downloads share this one row.
+                            // Shown when more than one server downloads, since the row is shared.
                             subtitle = when {
                                 paused -> "Paused"
                                 severalServers && progress.currentSource != null ->
@@ -192,14 +157,9 @@ class DownloadsScreen(sealed: SealedLightActivity) : SimpleLightScreen<Unit>(sea
                 item {
                     SectionLabel("$total tracks · ${formatGb(bytes)} / ${formatGb(limit)}")
                 }
-                // A list to read, not to play from: a track from a source that
-                // isn't the current one resolves its file and its stream through
-                // the wrong server, so tapping it could only mislead. The
-                // library is where music is played from; this is where you see
-                // what the phone is holding.
+                // Rows are read-only. Playing from here would resolve through the wrong
+                // server for any source that isn't the active one.
                 sorted.forEach { (source, list) ->
-                    // Named only when there is more than one, since with a
-                    // single source the heading would repeat the obvious.
                     if (named) item(key = "src-$source") { SectionLabel(source) }
                     items(list, key = { "$source-${it.id}" }) { track ->
                         TrackRow(
@@ -220,9 +180,8 @@ class DownloadsScreen(sealed: SealedLightActivity) : SimpleLightScreen<Unit>(sea
 /**
  * What one server downloads without being asked.
  *
- * Titled "Auto-Download" rather than the OfflineMode name the setting keeps:
- * "Offline Mode" sounds like a switch that takes the app offline, and under a
- * page already called Offline it said nothing the header hadn't.
+ * Titled "Auto-Download", not the OfflineMode name the setting keeps.
+ * "Offline Mode" reads like a switch that takes the app offline.
  */
 class OfflineModeScreen(
     sealed: SealedLightActivity,
@@ -237,7 +196,7 @@ class OfflineModeScreen(
                 items(OfflineMode.entries.toList()) { mode ->
                     TextRow(
                         title = offlineModeLabel(mode),
-                        // A sentence, not a label — see TextRow.subtitleLines.
+                        // A sentence, not a label. See TextRow.subtitleLines.
                         subtitle = offlineModeDetail(mode),
                         subtitleLines = MODE_DETAIL_LINES,
                         onClick = {
@@ -261,7 +220,7 @@ class DataModeScreen(sealed: SealedLightActivity) : SimpleLightScreen<Unit>(seal
                 items(DataMode.entries.toList()) { mode ->
                     TextRow(
                         title = dataModeLabel(mode),
-                        // A sentence, not a label — see TextRow.subtitleLines.
+                        // A sentence, not a label. See TextRow.subtitleLines.
                         subtitle = dataModeDetail(mode),
                         subtitleLines = MODE_DETAIL_LINES,
                         onClick = {
@@ -278,8 +237,8 @@ class DataModeScreen(sealed: SealedLightActivity) : SimpleLightScreen<Unit>(seal
 
 
 /**
- * Size budget. The offered values stop at what the device can actually spare —
- * see [com.garado.amp.data.DownloadStore.maxSelectableBytes].
+ * Size budget. Offered values stop at what the device can spare.
+ * See [com.garado.amp.data.DownloadStore.maxSelectableBytes].
  */
 class SizeLimitScreen(sealed: SealedLightActivity) : SimpleLightScreen<Unit>(sealed) {
     @Composable

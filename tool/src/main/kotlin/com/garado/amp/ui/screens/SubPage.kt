@@ -15,14 +15,7 @@ import com.garado.amp.ui.components.AppIcons
 import com.garado.amp.ui.components.HeaderAction
 import com.thelightphone.sdk.SimpleLightScreen
 
-/**
- * Chrome for every library sub-page (album, artist, playlist, liked, …): the
- * page's own content with the library bottom bar kept underneath it.
- */
-/**
- * Open library search from a sub-page: the search field lives in the shell's
- * header, so activate it and unwind to the shell.
- */
+/** Opens library search from a sub-page by activating it and unwinding to the shell. */
 fun SimpleLightScreen<*>.openLibrarySearch(withKeyboard: Boolean = false) {
     LibraryNav.openSearch(withKeyboard)
     popToRoot()
@@ -34,40 +27,31 @@ fun simplifiedLayout(): Boolean =
     App.layoutMode.collectAsState().value == LayoutMode.SIMPLIFIED
 
 /**
- * Back out of a page opened from the simplified layout's library index.
- *
- * Only under Simplified, and for the same reason the corner is free there: the
- * standard layout keeps the player in that slot and leaves by the tab bar,
- * which these pages sit alongside rather than under.
+ * Back action for a page opened from the simplified layout's library index.
+ * Null outside Simplified, where the standard layout's tab bar handles leaving instead.
  */
 @Composable
 fun SimpleLightScreen<*>.libraryBackAction(): (() -> Unit)? =
     if (simplifiedLayout()) ({ goBack() }) else null
 
-/**
- * More sits in every library page's right-hand corner — see LibraryShell.
- *
- * [page] is what More carries up: the corner is drawn by the page itself, so
- * this is where the menu learns whose view, sort and filter it is showing.
- */
+/** The More corner action in every library page's header. See LibraryShell and [MoreScreen]. */
 @Composable
 fun SimpleLightScreen<*>.libraryCornerAction(
     page: LibraryPage,
-    /** Only where the page's name isn't a constant — see [MoreScreen]. */
+    /** Only needed where the page's name isn't a constant. See [MoreScreen]. */
     pageTitle: String? = null,
 ): HeaderAction =
     HeaderAction(
         AppIcons.Sort,
-        // Held, the corner is the way to Settings from any library page.
         onLongClick = { go { SettingsScreen(it) } },
     ) { go { MoreScreen(it, page, pageTitle) } }
 
-
+/** Chrome for every library sub-page: the page's content with the library bottom bar under it. */
 @Composable
 fun SimpleLightScreen<*>.LibrarySubPage(
-    /** Which page this is, for the More the bar below opens — see [MoreScreen]. */
+    /** Which page this is, for the More the bar below opens. See [MoreScreen]. */
     page: LibraryPage,
-    /** Only where the page's name isn't a constant — see [MoreScreen]. */
+    /** Only needed where the page's name isn't a constant. See [MoreScreen]. */
     pageTitle: String? = null,
     /** Set by More, which is a tab in its own right rather than a page of one. */
     moreActive: Boolean = false,
@@ -82,30 +66,17 @@ fun SimpleLightScreen<*>.LibrarySubPage(
             }
             val current by LibraryNav.currentTab.collectAsState()
             Navbar(
-                // The tab you came from stays lit however deep this page is:
-                // a branch is still that tab, and back walks up it one level
-                // at a time. Only More is a place of its own.
+                // The tab stays lit regardless of how deep the current page is nested.
                 current = if (moreActive) null else current,
                 moreActive = moreActive,
                 onSelect = { tab ->
                     LibraryNav.selectTab(tab)
                     popToRoot()
                 },
-                // Nothing to open when this *is* More: the bar stays on that
-                // page now, and a destination that pushes a copy of itself is a
-                // stack that only grows.
                 onMore = { if (!moreActive) go { MoreScreen(it, page, pageTitle) } },
-                // The bar is on these pages too, so its search reaches the
-                // library the way the header's used to: activate and unwind.
                 onSearch = { openLibrarySearch() },
-                // Simplified puts the player and the library in the bar. From
-                // a sub-page the library means the page this one was opened
-                // from, so unwind to the shell and leave it showing whatever it
-                // was showing — see LibraryNav.returnToLibrary.
                 onNowPlaying = { go { NowPlayingScreen(it) } },
                 onBrowse = {
-                    // The button goes to the top of the library, however deep
-                    // this page is; back is what walks up one level at a time.
                     LibraryNav.openLibraryIndex()
                     popToRoot()
                 },

@@ -42,19 +42,15 @@ import com.thelightphone.sdk.ui.lightClickable
 
 @Composable
 fun rememberArtwork(coverArtId: String?, sizePx: Int): ImageBitmap? {
-    // Gated here rather than at each drawing site: this is the only way into the
-    // artwork cache, so switching covers off also stops fetching and decoding
-    // them, which is most of what they cost.
+    // This is the only entry point into the artwork cache, so hiding covers
+    // here also stops fetching and decoding them.
     val hidden by App.hideArtwork.collectAsState()
-    // Seeded from the memory cache so a cover that has already been decoded is
-    // there on the first frame rather than after one — see ArtworkLoader.peek.
+    // Seeded from the memory cache so an already-decoded cover shows on the
+    // first frame; see ArtworkLoader.peek.
     val cached = if (hidden) null else App.artwork.peek(coverArtId, sizePx)
-    // Re-created for each cover rather than held across the change, which is
-    // what left the previous track's sleeve on screen when you skipped: with
-    // produceState, `initialValue` applies only to the first composition and the
-    // held value survives a key change until the producer assigns a new one — so
-    // a cover already in the memory cache, which returns early rather than
-    // loading, never assigned anything and the old bitmap simply stayed.
+    // Must be a fresh state per cover, not held across the key change via
+    // produceState: a cover already in the memory cache returns without
+    // assigning a new value, leaving the previous track's cover on screen.
     var image by remember(coverArtId, sizePx, hidden) { mutableStateOf(cached) }
     LaunchedEffect(coverArtId, sizePx, hidden) {
         if (image != null) return@LaunchedEffect
@@ -70,10 +66,9 @@ fun rememberArtwork(coverArtId: String?, sizePx: Int): ImageBitmap? {
 // --- Clickable helpers ------------------------------------------------------
 
 /**
- * Haptics for presses: a light tick for taps, the heavier pattern for holds.
- *
- * The LP3 has no press animation — [lightClickable] deliberately draws no
- * indication — so touch feedback is the only confirmation a tap registered.
+ * Haptics for presses: a light tick for taps, a heavier pattern for holds.
+ * [lightClickable] draws no press indication, so haptics are the only
+ * confirmation a tap registered.
  */
 @Composable
 fun rememberTapHaptics(): Pair<() -> Unit, () -> Unit> {
@@ -87,12 +82,8 @@ fun rememberTapHaptics(): Pair<() -> Unit, () -> Unit> {
 }
 
 /**
- * A long press that has to be held for longer than the platform default.
- *
- * Compose's ~500ms is short enough that scrolling a list with a lazy thumb
- * opens a context menu instead, and on the player it means resting a finger on
- * the cover throws you into the full-size page. Both are gestures that should
- * feel deliberate.
+ * A long press held longer than the platform default of ~500ms, which is
+ * short enough to misfire during a slow scroll or a resting finger.
  */
 @Composable
 fun Modifier.slowLongPress(
@@ -102,9 +93,8 @@ fun Modifier.slowLongPress(
 ): Modifier {
     val (tick, thud) = rememberTapHaptics()
     if (onLongPress == null) return this.rowClickable(onClick = onClick)
-    // Held rather than keyed on, so the gesture isn't torn down and restarted
-    // every time a row recomposes — which, now that every list row comes
-    // through here, would happen mid-press often enough to matter.
+    // Uses rememberUpdatedState rather than keying on these, so the gesture
+    // detector isn't torn down and restarted on every recomposition.
     val click by rememberUpdatedState(onClick)
     val long by rememberUpdatedState(onLongPress)
     return this.pointerInput(holdMs) {
@@ -117,10 +107,8 @@ fun Modifier.slowLongPress(
                     tick()
                     click()
                 }
-                // Null means either the hold outlasted the deadline or the press
-                // was taken away — a scroll claiming the pointer, most often —
-                // and only the clock tells those apart. Reading both as a long
-                // press is what let a flick down a list open a context menu.
+                // Null also happens when a scroll claims the pointer. Check the
+                // elapsed time to tell that apart from a real long press.
                 System.currentTimeMillis() - startedAt >= holdMs -> {
                     thud()
                     long()
@@ -136,14 +124,10 @@ fun Modifier.slowLongPress(
 const val LONG_PRESS_MS = 900L
 
 /**
- * A row that responds to a tap, and optionally to a long press.
- *
- * Any row that wants a long press goes through [slowLongPress] for it, so every
- * long press in the app is the same length. `combinedClickable` can't be told
- * one: it reads the timeout from the ambient ViewConfiguration, which is
- * Android's own ~400ms, and the composition local that would override it is a
- * blocked import in the SDK sandbox. So rows with a menu behind them held for
- * half as long as the artwork did, which is a gesture meaning two things.
+ * A row that responds to a tap, and optionally to a long press. Rows with a
+ * long press go through [slowLongPress] instead of `combinedClickable`'s own
+ * timeout, since the composition local to override that timeout is blocked
+ * in the SDK sandbox.
  */
 @Composable
 fun Modifier.rowClickable(
@@ -163,9 +147,8 @@ fun Modifier.rowClickable(
 }
 
 /**
- * Icon/button counterpart to [rowClickable]: the SDK's clickable plus a haptic
- * tick. Used everywhere instead of calling `lightClickable` directly, so every
- * press in the app feels the same.
+ * Icon/button counterpart to [rowClickable]: the SDK's clickable plus a
+ * haptic tick. Use this instead of calling `lightClickable` directly.
  */
 @Composable
 fun Modifier.appClickable(
@@ -182,47 +165,25 @@ fun Modifier.appClickable(
 // --- Rows -------------------------------------------------------------------
 
 /**
- * A menu row, drawn the way the phone's own menus are.
- *
- * Measured off LightOS's stock tools — the Phone list, Calendar's settings, the
- * SDK-built Weather's: one line for a row that does something, and for a row
- * that names a setting, the name small above its current value large, the
- * value being the information. The stock menus set the line in Heading; tried,
- * and it shouted on a page of rows, so it sits one step down Light's scale at
- * Copy — the size the phone's own lists title in. Text starts [MENU_INSET_DP] in, the two units
- * Light's text-only lists use; the lists with a mark and a cover keep the 72px
- * axis Light's own Music list has ([ROW_LEAD_PX]).
+ * A menu row, styled like LightOS's own stock menus: one line for an action
+ * row, or a small label above a large value for a setting row.
  */
 @Composable
 fun TextRow(
     title: String,
     modifier: Modifier = Modifier,
-    /**
-     * The setting's current value, drawn large under the title — which becomes
-     * its label. For a row that names a setting rather than doing something.
-     */
+    /** The setting's current value; title becomes its label when this is set. */
     value: String? = null,
-    /**
-     * A line under the title saying what the row does, or how it stands.
-     *
-     * One line by default: most are a name or a count, and letting those wrap
-     * would make a list of rows ragged to no purpose. Raised where it is a
-     * sentence explaining what the row does, which is a different job.
-     */
+    /** A line under the title. One line by default; raise [subtitleLines] for longer text. */
     subtitle: String? = null,
     subtitleLines: Int = 1,
     onLongClick: (() -> Unit)? = null,
     /** Sits before the text, for a row that needs saying what it opens. */
     leading: (@Composable () -> Unit)? = null,
     trailing: (@Composable () -> Unit)? = null,
-    /** Marks this row as the current selection among a set of rows — see the Library index. */
+    /** Marks this row as the current selection among a set of rows. */
     underline: Boolean = false,
-    /**
-     * Null for a row that states something rather than opening it — a setting
-     * with only one possible value, which More still shows so the page's
-     * modifiers all read alike. It doesn't take a press, and its main line is
-     * dimmed to say so before the press is tried.
-     */
+    /** Null for a non-interactive row; its main line is dimmed to show that. */
     onClick: (() -> Unit)? = null,
 ) {
     Row(
@@ -251,7 +212,7 @@ fun TextRow(
     }
 }
 
-/** A menu row's main line: Light's Copy — Heading read too big, see [TextRow]. */
+/** A menu row's main line, at Light's Copy size (Heading reads too big here). */
 @Composable
 private fun MenuLine(text: String, dim: Boolean, underline: Boolean = false) {
     AppText(
