@@ -1,32 +1,48 @@
 package com.garado.amp.ui.screens
 
 import android.view.KeyEvent
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.dp
 import com.garado.amp.App
-import com.garado.amp.ui.components.ListScreen
-import com.garado.amp.ui.components.SectionLabel
-import com.garado.amp.ui.components.ScrollableList
-import com.garado.amp.ui.components.TextRow
+import com.garado.amp.ui.PlayerTheme
+import com.garado.amp.ui.components.NumericKeypad
 import com.thelightphone.sdk.SealedLightActivity
 import com.thelightphone.sdk.SimpleLightScreen
-import com.thelightphone.sdk.ui.LightIcon
+import com.thelightphone.sdk.ui.LightBarButton
 import com.thelightphone.sdk.ui.LightIcons
+import com.thelightphone.sdk.ui.LightText
+import com.thelightphone.sdk.ui.LightTextVariant
+import com.thelightphone.sdk.ui.LightThemeTokens
+import com.thelightphone.sdk.ui.LightTopBar
+import com.thelightphone.sdk.ui.LightTopBarCenter
 import kotlinx.coroutines.launch
+
+private const val MAX_RATING = 100
+private const val MAX_RATING_DIGITS = 3
 
 /** "81 / 100" for a rating, so the value reads at a glance. */
 fun ratingLabel(rating: Int): String = "${rating.coerceIn(0, 100)} / 100"
 
 /**
- * Pick a 1–5 star rating, or clear it.
+ * Enter a 0–100 rating on a bare numeric keypad, digits only.
  *
- * The rating is written to Navidrome first and only cached locally once the
- * server accepts it, so what the app shows always matches what the server holds.
+ * The rating is written to the server first and only cached locally once it's
+ * accepted — see LibraryRepository.setRating, which also queues it for retry
+ * when the server can't be reached right now.
  */
 class RatingScreen(
     sealed: SealedLightActivity,
@@ -42,31 +58,70 @@ class RatingScreen(
 
     @Composable
     override fun Content() {
-        var status by remember { mutableStateOf<String?>(null) }
-        var saving by remember { mutableStateOf(false) }
+        PlayerTheme {
+            var draft by remember { mutableStateOf(current.toString()) }
 
-        ListScreen(onBack = { goBack() }, title = "Rating") {
-            ScrollableList(modifier = Modifier.fillMaxSize()) {
-                item { SectionLabel(status ?: title) }
-                items(6) { i ->
-                    // Listed 5 stars down to none, so the common choices are first.
-                    val stars = 5 - i
-                    TextRow(
-                        title = if (stars == 0) "No rating" else ratingLabel(stars),
-                        onClick = {
-                            if (saving) return@TextRow
-                            saving = true
-                            status = "Saving…"
-                            App.scope.launch {
-                                val ok = App.library.setRating(id, stars, isAlbum)
-                                if (ok) goBack() else { status = "Couldn't reach the server"; saving = false }
-                            }
-                        },
-                        trailing = {
-                            if (stars == current) LightIcon(LightIcons.ACCEPT, size = 1.4f)
-                        },
+            fun submit() {
+                val rating = draft.toIntOrNull()?.coerceIn(0, MAX_RATING) ?: 0
+                App.scope.launch {
+                    App.library.setRating(id, rating, isAlbum)
+                    goBack()
+                }
+            }
+
+            Column(modifier = Modifier.fillMaxSize()) {
+                LightTopBar(
+                    leftButton = LightBarButton.LightIcon(
+                        icon = LightIcons.BACK,
+                        onClick = { goBack() },
+                    ),
+                    center = LightTopBarCenter.Text("Rating"),
+                )
+
+                Column(
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxWidth()
+                        .padding(horizontal = 32.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                ) {
+                    LightText(
+                        text = title,
+                        variant = LightTextVariant.Detail,
+                        align = TextAlign.Center,
+                        maxLines = 1,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(top = 16.dp),
+                    )
+                    LightText(
+                        text = draft,
+                        variant = LightTextVariant.Title,
+                        align = TextAlign.Center,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(top = 8.dp, bottom = 4.dp),
+                    )
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth(0.5f)
+                            .height(2.dp)
+                            .background(LightThemeTokens.colors.content),
                     )
                 }
+
+                NumericKeypad(
+                    onDigit = { digit ->
+                        if (draft.length < MAX_RATING_DIGITS) {
+                            // Collapses a leading zero from typing over a prefilled
+                            // "0" rather than needing a backspace first.
+                            val candidate = (draft + digit).trimStart('0').ifEmpty { "0" }
+                            if ((candidate.toIntOrNull() ?: 0) <= MAX_RATING) draft = candidate
+                        }
+                    },
+                    onBackspace = { draft = draft.dropLast(1) },
+                    onSubmit = { submit() },
+                )
             }
         }
     }
